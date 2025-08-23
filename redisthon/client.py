@@ -4,7 +4,6 @@ Redis/Dragonfly client with connection management.
 
 import base64
 import logging
-from datetime import datetime
 from typing import Any, Dict, Optional, cast
 
 import msgpack
@@ -43,21 +42,21 @@ class RedisClient:
     )
 
     def __init__(
-        self,
-        *,
-        host: str = 'localhost',
-        port: int = 6379,
-        db: int = 0,
-        password: Optional[str] = None,
-        username: Optional[str] = None,
-        max_connections: int = 50,
-        socket_keepalive: bool = True,
-        socket_keepalive_options: Optional[Dict[str, Any]] = None,
-        health_check_interval: int = 30,
-        connection_timeout: int = 5,
-        socket_timeout: int = 5,
-        is_dragonfly: bool = False,
-        redis_client: Optional[redis.Redis] = None,
+            self,
+            *,
+            host: str = 'localhost',
+            port: int = 6379,
+            db: int = 0,
+            password: Optional[str] = None,
+            username: Optional[str] = None,
+            max_connections: int = 50,
+            socket_keepalive: bool = True,
+            socket_keepalive_options: Optional[Dict[str, Any]] = None,
+            health_check_interval: int = 30,
+            connection_timeout: int = 5,
+            socket_timeout: int = 5,
+            is_dragonfly: bool = False,
+            redis_client: Optional[redis.Redis] = None,
     ) -> None:
         self._is_dragonfly = is_dragonfly
 

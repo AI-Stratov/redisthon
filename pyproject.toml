@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [
-    { name = "redisthon contributors" },
+    { name = "Andrew Istratov" },
 ]
 keywords = ["telethon", "redis", "dragonfly", "session", "telegram", "performance"]
 classifiers = [
@@ -49,10 +49,10 @@ benchmark = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/redisthon"
-Repository = "https://github.com/yourusername/redisthon"
-Issues = "https://github.com/yourusername/redisthon/issues"
-Documentation = "https://github.com/yourusername/redisthon#readme"
+Homepage = "https://github.com/AI-Stratov/redisthon"
+Repository = "https://github.com/AI-Stratov/redisthon"
+Issues = "https://github.com/AI-Stratov/redisthon/issues"
+Documentation = "https://github.com/AI-Stratov/redisthon#readme"
 
 [tool.hatch.build.targets.wheel]
 packages = ["redisthon"]
