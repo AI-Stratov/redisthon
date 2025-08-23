@@ -2,13 +2,10 @@
 Tests for RedisSession core functionality.
 """
 
-import pytest
-from unittest.mock import Mock
-import base64
 from datetime import datetime, timezone
 
-from telethon.crypto import AuthKey
-from telethon.tl.types import InputPhoto, InputDocument
+import pytest
+from telethon.tl.types import InputPhoto
 from telethon.tl.types.updates import State
 
 from redisthon import RedisSession

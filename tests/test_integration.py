@@ -11,11 +11,11 @@ Configure via environment variables:
 """
 
 import os
-import pytest
 from unittest.mock import patch
 
+import pytest
+
 from redisthon import RedisSession, RedisClient
-from redisthon.exceptions import ConnectionError
 
 
 def get_redis_config():

@@ -4,9 +4,9 @@ redisthon - High-performance Redis/Dragonfly session storage for Telethon.
 Modern implementation with modular architecture.
 """
 
-from .session import RedisSession
 from .client import RedisClient
 from .exceptions import RedisthonError, ConnectionError, SerializationError
+from .session import RedisSession
 
 __version__ = '0.1.0'
 __author__ = 'AI-Stratov'

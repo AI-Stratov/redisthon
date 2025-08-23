@@ -2,12 +2,13 @@
 Tests for RedisClient functionality.
 """
 
+from unittest.mock import Mock, patch
+
 import pytest
-from unittest.mock import Mock, MagicMock, patch
 import redis
 
 from redisthon.client import RedisClient
-from redisthon.exceptions import ConnectionError, SerializationError, ConfigurationError
+from redisthon.exceptions import ConnectionError, SerializationError
 
 
 class TestRedisClientInitialization:

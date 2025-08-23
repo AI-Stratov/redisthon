@@ -7,16 +7,15 @@ Implements all required Telethon session methods with Redis/Dragonfly backend.
 import base64
 import logging
 from datetime import datetime, timezone
-from typing import Any, Iterator, Optional
+from typing import Any, Optional
 
-from telethon import utils
 from telethon.crypto import AuthKey
 from telethon.sessions.memory import MemorySession, _SentFileType
-from telethon.tl.types import InputDocument, InputPhoto, PeerChannel, PeerChat, PeerUser
+from telethon.tl.types import InputDocument, InputPhoto
 from telethon.tl.types.updates import State
 
 from .client import RedisClient
-from .exceptions import SessionError, ConnectionError
+from .exceptions import SessionError
 
 logger = logging.getLogger(__name__)
 
@@ -61,28 +60,28 @@ class RedisSession(MemorySession):  # type: ignore[misc]
     )
 
     def __init__(
-        self,
-        session_name: str | bytes,
-        *,
-        # Redis connection settings
-        host: str = 'localhost',
-        port: int = 6379,
-        db: int = 0,
-        password: Optional[str] = None,
-        username: Optional[str] = None,
-        is_dragonfly: bool = False,
-        redis_client: Optional[RedisClient] = None,
+            self,
+            session_name: str | bytes,
+            *,
+            # Redis connection settings
+            host: str = 'localhost',
+            port: int = 6379,
+            db: int = 0,
+            password: Optional[str] = None,
+            username: Optional[str] = None,
+            is_dragonfly: bool = False,
+            redis_client: Optional[RedisClient] = None,
 
-        # Connection settings
-        max_connections: int = 50,
-        socket_keepalive: bool = True,
-        socket_keepalive_options: Optional[dict[str, Any]] = None,
-        connection_timeout: int = 5,
+            # Connection settings
+            max_connections: int = 50,
+            socket_keepalive: bool = True,
+            socket_keepalive_options: Optional[dict[str, Any]] = None,
+            connection_timeout: int = 5,
 
-        # Session settings
-        key_prefix: str = 'redisthon:session',
-        ttl_seconds: int = 86400 * 30,  # 30 days default
-        save_entities: bool = True,
+            # Session settings
+            key_prefix: str = 'redisthon:session',
+            ttl_seconds: int = 86400 * 30,  # 30 days default
+            save_entities: bool = True,
     ) -> None:
         if not isinstance(session_name, (str, bytes)):
             raise SessionError("Session name must be a string or bytes")
@@ -479,13 +478,15 @@ class RedisSession(MemorySession):  # type: ignore[misc]
                     return InputPhoto(
                         id=file_data['id'],
                         access_hash=file_data['access_hash'],
-                        file_reference=bytes.fromhex(file_data['file_reference']) if file_data['file_reference'] else b''
+                        file_reference=bytes.fromhex(file_data['file_reference']) if file_data[
+                            'file_reference'] else b''
                     )
                 elif cls == InputDocument:
                     return InputDocument(
                         id=file_data['id'],
                         access_hash=file_data['access_hash'],
-                        file_reference=bytes.fromhex(file_data['file_reference']) if file_data['file_reference'] else b''
+                        file_reference=bytes.fromhex(file_data['file_reference']) if file_data[
+                            'file_reference'] else b''
                     )
             return None
         except Exception as e:

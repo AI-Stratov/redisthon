@@ -1,9 +1,11 @@
 """
-Test configuration and fixtures for redisthon.
+Test configuration and fixtures
 """
 
+from unittest.mock import Mock
+
 import pytest
-from unittest.mock import Mock, MagicMock
+
 from redisthon import RedisSession, RedisClient
 
 

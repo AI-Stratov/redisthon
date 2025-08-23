@@ -1,13 +1,14 @@
 """
-Performance benchmarks for redisthon components.
+Performance benchmarks for components.
 """
 
-import pytest
 import time
 from unittest.mock import Mock, patch
 
-from redisthon.client import RedisClient
+import pytest
+
 from redisthon import RedisSession
+from redisthon.client import RedisClient
 
 
 class TestSerializationPerformance:
