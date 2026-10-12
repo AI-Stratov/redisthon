@@ -1,7 +1,5 @@
 """
-redisthon - High-performance Redis/Dragonfly session storage for Telethon.
-
-Modern implementation with modular architecture.
+redisthon - Telethon session storage in Redis or Dragonfly.
 """
 
 from .client import RedisClient
@@ -10,7 +8,7 @@ from .session import RedisSession
 
 __version__ = '0.1.0'
 __author__ = 'AI-Stratov'
-__description__ = 'High-performance Redis/Dragonfly session storage for Telethon'
+__description__ = 'Telethon session storage in Redis or Dragonfly'
 
 __all__ = [
     'ConnectionError',

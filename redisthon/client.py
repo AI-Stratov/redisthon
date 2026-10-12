@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 class RedisClient:
     """
-    Redis/Dragonfly client with optimized connection management.
+    Redis/Dragonfly client with a connection pool and msgpack serialization.
 
     :param host: Redis/Dragonfly server host
     :param port: Server port
@@ -261,7 +261,7 @@ class RedisClient:
 
     def hash_scan(self, key: str) -> list[tuple[str, Any]]:
         """
-        Scan all hash fields efficiently.
+        Read all hash fields with HSCAN.
 
         :param key: Hash key
         :returns: List of (field, value) tuples
