@@ -241,15 +241,12 @@ class RedisClient:
             if isinstance(raw_data, str):
                 # Data is base64 encoded string
                 data_bytes = base64.b64decode(raw_data.encode('utf-8'))
-            elif isinstance(raw_data, bytes):
+            else:
                 # Try to decode as base64 first, if that fails assume it's raw bytes
                 try:
                     data_bytes = base64.b64decode(raw_data)
                 except Exception:
                     data_bytes = raw_data  # Use raw bytes as is
-            else:
-                # Fallback for other types
-                data_bytes = cast(bytes, raw_data)
 
             return self.deserialize(data_bytes)
         except Exception as e:
@@ -305,7 +302,7 @@ class RedisClient:
         """
         try:
             result = self._redis_client.hlen(key)
-            return cast(int, result)
+            return result
         except Exception as e:
             raise ConnectionError(
                 f"Failed to get hash length '{key}': {e}",
@@ -355,7 +352,7 @@ class RedisClient:
         :returns: Server information dictionary
         """
         try:
-            info = cast(dict[str, Any], self._redis_client.info())
+            info = self._redis_client.info()
             return {
                 'redis_version': info.get('redis_version', 'unknown'),
                 'connected_clients': info.get('connected_clients', 0),

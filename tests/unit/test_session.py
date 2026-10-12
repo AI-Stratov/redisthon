@@ -59,7 +59,7 @@ class TestSessionDataManagement:
 
         redis_session._client.set_key.assert_called()
         call_args = redis_session._client.set_key.call_args
-        key, data, ttl = call_args[0]
+        key, data, _ttl = call_args[0]
 
         assert key == redis_session._session_key
         assert data['dc_id'] == 2
