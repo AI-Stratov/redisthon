@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run ruff check --no-fix .
+      - run: uv run ruff format --check .
+      - run: uv run mypy redisthon
+
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run pytest tests/unit --cov=redisthon --cov-report=term-missing
+
+  integration:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        redis: ["6.2", "7.4", "8.2"]
+        deps: [locked]
+        include:
+          # Oldest supported Python with the lowest allowed dependency versions
+          - redis: "7.4"
+            deps: lowest
+    name: integration (redis ${{ matrix.redis }}, ${{ matrix.deps }} deps)
+    services:
+      redis:
+        image: redis:${{ matrix.redis }}
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+      dragonfly:
+        image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.34.1
+        ports: ["6380:6379"]
+        options: --ulimit memlock=-1
+    env:
+      REDIS_PORT: "6379"
+      DRAGONFLY_PORT: "6380"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: ${{ matrix.deps == 'lowest' && '3.11' || '3.13' }}
+          enable-cache: true
+      - if: matrix.deps == 'locked'
+        run: uv sync --locked
+      - if: matrix.deps == 'lowest'
+        run: uv sync --resolution lowest-direct
+      - name: Wait for Dragonfly
+        run: |
+          uv run python - <<'PY'
+          import time, redis
+          for _ in range(30):
+              try:
+                  redis.Redis(port=6380).ping()
+                  break
+              except redis.ConnectionError:
+                  time.sleep(1)
+          else:
+              raise SystemExit('Dragonfly did not start')
+          PY
+      - run: uv run pytest tests/integration -v
