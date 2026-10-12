@@ -1,5 +1,5 @@
 """
-Test configuration and fixtures
+Fixtures for unit tests. Nothing here talks to a real Redis server.
 """
 
 from unittest.mock import Mock

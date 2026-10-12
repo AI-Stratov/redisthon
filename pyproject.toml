@@ -98,24 +98,10 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
-python_functions = ["test_*"]
-python_classes = ["Test*"]
-addopts = [
-    "--strict-markers",
-    "--strict-config",
-    "--verbose",
-    "--tb=short",
-    "--cov=redisthon",
-    "--cov-report=term-missing",
-    "--cov-report=html",
-]
-markers = [
-    "benchmark: performance benchmark tests",
-    "integration: integration tests requiring Redis server",
-    "slow: tests that take a long time to run",
-]
+# Unit tests only by default. Integration tests need a server:
+#   pytest tests/integration
+testpaths = ["tests/unit"]
+addopts = ["--strict-markers", "--strict-config", "--tb=short"]
 
 [tool.coverage.run]
 source = ["redisthon"]

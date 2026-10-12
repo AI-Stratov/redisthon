@@ -1,12 +1,12 @@
 """
-Tests for RedisSession core functionality.
+Unit tests for RedisSession. RedisClient is replaced with a mock.
 """
 
 from datetime import UTC, datetime
 
 import pytest
 from telethon.crypto import AuthKey
-from telethon.tl.types import InputPeerUser, InputPhoto
+from telethon.tl.types import InputPeerUser, InputPhoto, User
 from telethon.tl.types.updates import State
 
 from redisthon import RedisSession
@@ -313,14 +313,81 @@ class TestErrorHandling:
         result = redis_session.get_entity_rows_by_id(123456789)
         assert result is None
 
-    def test_save_session_handles_errors_gracefully(self, redis_session):
-        """Test that save handles Redis errors gracefully."""
+    def test_save_wraps_redis_errors(self, redis_session):
+        """A failed write surfaces as SessionError, it is not swallowed."""
         redis_session._client.set_key.side_effect = Exception('Redis error')
-        redis_session.set_dc(2, 'test.telegram.org', 443)
 
-        # Should raise SessionError with proper context
-        with pytest.raises(SessionError):
-            redis_session.save()
+        with pytest.raises(SessionError) as exc_info:
+            redis_session.set_dc(2, 'test.telegram.org', 443)
+
+        assert exc_info.value.session_name == 'test_session'
+
+    def test_load_wraps_redis_errors(self, mock_redis_client):
+        mock_redis_client.get_key.side_effect = Exception('Redis error')
+
+        with pytest.raises(SessionError, match='Failed to load session data'):
+            RedisSession('test_session', redis_client=mock_redis_client)
+
+
+class TestTTL:
+    """ttl_seconds is applied to every key the session writes."""
+
+    def test_session_key_gets_ttl(self, mock_redis_client):
+        session = RedisSession('s', redis_client=mock_redis_client, ttl_seconds=60)
+        session.set_dc(2, 'test.telegram.org', 443)
+
+        key, _, ttl = mock_redis_client.set_key.call_args.args
+        assert key == session._session_key
+        assert ttl == 60
+
+    def test_zero_ttl_disables_expiry(self, mock_redis_client):
+        session = RedisSession('s', redis_client=mock_redis_client, ttl_seconds=0)
+        session.set_dc(2, 'test.telegram.org', 443)
+        session.cache_file(
+            b'md5', 1, InputPhoto(id=1, access_hash=2, file_reference=b'')
+        )
+
+        assert mock_redis_client.set_key.call_args.args[2] is None
+        mock_redis_client.expire_key.assert_not_called()
+
+    def test_hashes_get_ttl(self, mock_redis_client):
+        session = RedisSession('s', redis_client=mock_redis_client, ttl_seconds=60)
+        session.process_entities([User(id=1, access_hash=2, username='alice')])
+        session.set_update_state(
+            0, State(pts=1, qts=1, date=datetime.now(UTC), seq=1, unread_count=0)
+        )
+        session.cache_file(
+            b'md5', 1, InputPhoto(id=1, access_hash=2, file_reference=b'')
+        )
+
+        expired = {call.args for call in mock_redis_client.expire_key.call_args_list}
+        assert expired == {
+            (session._entities_key, 60),
+            (session._update_states_key, 60),
+            (session._sent_files_key, 60),
+        }
+
+
+class TestProcessEntities:
+    def test_users_are_written_to_entities_hash(self, redis_session):
+        user = User(
+            id=10, access_hash=20, username='Alice', phone='123', first_name='Al'
+        )
+        redis_session.process_entities([user])
+
+        key, field, data = redis_session._client.hash_set.call_args.args
+        assert key == redis_session._entities_key
+        assert field == '10'
+        assert data['access_hash'] == 20
+        assert data['username'] == 'alice'
+        assert data['phone'] == '123'
+        assert data['name'] == 'Al'
+
+    def test_save_entities_false_skips_writes(self, mock_redis_client):
+        session = RedisSession('s', redis_client=mock_redis_client, save_entities=False)
+        session.process_entities([User(id=10, access_hash=20)])
+
+        mock_redis_client.hash_set.assert_not_called()
 
 
 class TestTelethonContract:
