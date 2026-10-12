@@ -1,6 +1,7 @@
 # redisthon
 
 [![CI](https://github.com/AI-Stratov/redisthon/actions/workflows/ci.yml/badge.svg)](https://github.com/AI-Stratov/redisthon/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/redisthon.svg)](https://pypi.org/project/redisthon/)
 
 Telethon session storage in Redis or Dragonfly, for Telegram bots and userbots
 that run in containers or move between hosts, where a local `.session` file is
@@ -8,10 +9,8 @@ inconvenient.
 
 ## Install
 
-Install from GitHub until the first PyPI release:
-
 ```bash
-pip install git+https://github.com/AI-Stratov/redisthon
+pip install redisthon
 ```
 
 ## Usage
