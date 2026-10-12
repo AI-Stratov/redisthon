@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "redisthon"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Telethon session storage in Redis or Dragonfly"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,6 +25,7 @@ classifiers = [
     "Topic :: Communications :: Chat",
     "Topic :: Database",
     "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
 ]
 dependencies = [
     "telethon>=1.34.0",
@@ -47,6 +48,9 @@ Repository = "https://github.com/AI-Stratov/redisthon"
 Issues = "https://github.com/AI-Stratov/redisthon/issues"
 Documentation = "https://github.com/AI-Stratov/redisthon#readme"
 
+[tool.hatch.version]
+path = "redisthon/_version.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["redisthon"]
 
@@ -57,7 +61,7 @@ target-version = "py311"
 [tool.ruff.lint]
 select = [
     "E", "W", "F", "I", "N", "UP", "ASYNC", "B", "C4", "PIE", "T20", "Q", "RUF",
-    "PERF", "FURB",
+    "PERF", "FURB", "G", "LOG", "SIM", "RET", "PT",
 ]
 ignore = ["E501", "N806", "N803"]
 
@@ -95,21 +99,12 @@ minversion = "9.0"
 #   pytest tests/integration
 testpaths = ["tests/unit"]
 addopts = ["--strict-markers", "--strict-config", "--tb=short"]
+filterwarnings = ["error"]
 
 [tool.coverage.run]
 source = ["redisthon"]
-omit = ["tests/*", "*/test_*.py"]
 branch = true
 
 [tool.coverage.report]
-precision = 2
+fail_under = 100
 show_missing = true
-skip_covered = false
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if TYPE_CHECKING:",
-    "if __name__ == .__main__.:",
-]

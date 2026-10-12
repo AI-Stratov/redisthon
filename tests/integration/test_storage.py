@@ -4,6 +4,7 @@ Integration tests against a real Redis or Dragonfly server.
 Run with: pytest tests/integration
 """
 
+import asyncio
 import os
 from datetime import UTC, datetime
 
@@ -12,7 +13,7 @@ from telethon.crypto import AuthKey
 from telethon.tl.types import InputDocument, InputPeerUser, User
 from telethon.tl.types.updates import State
 
-from redisthon import RedisSession
+from redisthon import RedisClient, RedisSession
 
 
 def open_session(server, key_prefix, name='s', **kwargs):
@@ -37,9 +38,13 @@ def test_auth_key_and_dc_persist(server, key_prefix):
 
 def test_telegram_client_sets_default_dc(server, key_prefix):
     """TelegramClient() picks a default DC and saves the session."""
-    session = open_session(server, key_prefix)
-    TelegramClient(session, api_id=1, api_hash='0' * 32)
 
+    async def create_client() -> RedisSession:
+        session = open_session(server, key_prefix)
+        TelegramClient(session, api_id=1, api_hash='0' * 32)
+        return session
+
+    session = asyncio.run(create_client())
     with open_session(server, key_prefix) as reloaded:
         assert reloaded.dc_id == session.dc_id
         assert reloaded.server_address == session.server_address
@@ -102,19 +107,68 @@ def test_sent_files_persist(server, key_prefix):
         assert session.get_file(b'\xaa' * 16, 9999, InputDocument) is None
 
 
-def test_ttl_is_applied(server, key_prefix):
+def test_ttl_is_applied_and_refreshed_on_save(server, key_prefix, redis_conn):
     with open_session(server, key_prefix, ttl_seconds=120) as session:
-        session.set_dc(2, '149.154.167.51', 443)
         session.process_entities([User(id=1, access_hash=2)])
-        conn = session._client._redis_client
-        assert 0 < conn.ttl(session._session_key) <= 120
-        assert 0 < conn.ttl(session._entities_key) <= 120
+        session.set_update_state(
+            0, State(pts=1, qts=0, date=None, seq=0, unread_count=0)
+        )
+        for key in redis_conn.scan_iter(match=f'{key_prefix}:*'):
+            redis_conn.persist(key)
+
+        session.set_dc(2, '149.154.167.51', 443)
+
+    keys = list(redis_conn.scan_iter(match=f'{key_prefix}:*'))
+    assert len(keys) == 3
+    assert all(0 < redis_conn.ttl(key) <= 120 for key in keys)
 
 
-def test_zero_ttl_means_no_expiry(server, key_prefix):
+def test_zero_ttl_means_no_expiry(server, key_prefix, redis_conn):
     with open_session(server, key_prefix, ttl_seconds=0) as session:
         session.set_dc(2, '149.154.167.51', 443)
-        assert session._client._redis_client.ttl(session._session_key) == -1
+    assert redis_conn.ttl(f'{key_prefix}:s:data') == -1
+
+
+def test_delete_removes_all_keys(server, key_prefix, redis_conn):
+    with open_session(server, key_prefix) as session:
+        session.set_dc(2, '149.154.167.51', 443)
+        session.process_entities([User(id=1, access_hash=2)])
+        session.delete()
+
+    assert list(redis_conn.scan_iter(match=f'{key_prefix}:*')) == []
+
+
+def test_list_sessions(server, key_prefix):
+    for name in ('b', 'a'):
+        with open_session(server, key_prefix, name=name) as session:
+            session.set_dc(2, '149.154.167.51', 443)
+
+    with open_session(server, key_prefix, name='other') as session:
+        assert session.list_sessions() == ['a', 'b']
+
+
+def test_clone_is_not_persisted(server, key_prefix, redis_conn):
+    with open_session(server, key_prefix) as session:
+        session.set_dc(2, '149.154.167.51', 443)
+        session.clone().set_dc(5, '91.108.56.1', 443)
+
+    assert [k.decode() for k in redis_conn.scan_iter(match=f'{key_prefix}:*')] == [
+        f'{key_prefix}:s:data'
+    ]
+
+
+def test_shared_client_survives_session_close(server, key_prefix):
+    settings = {
+        k: v for k, v in server.items() if k in ('host', 'port', 'is_dragonfly')
+    }
+    with RedisClient(**settings) as client:
+        first = RedisSession('a', key_prefix=key_prefix, redis_client=client)
+        second = RedisSession('b', key_prefix=key_prefix, redis_client=client)
+        first.set_dc(2, '149.154.167.51', 443)
+        first.close()
+
+        second.set_dc(2, '149.154.167.51', 443)
+        assert client.key_exists(f'{key_prefix}:a:data')
 
 
 def test_health_info_and_statistics(server, key_prefix):

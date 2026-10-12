@@ -2,22 +2,27 @@
 redisthon - Telethon session storage in Redis or Dragonfly.
 """
 
+from ._version import __version__
 from .client import RedisClient
-from .exceptions import ConnectionError, RedisthonError, SerializationError
+from .exceptions import (
+    ConfigurationError,
+    ConnectionError,
+    RedisthonError,
+    SerializationError,
+    SessionError,
+)
 from .session import RedisSession
 
-__version__ = '0.1.0'
 __author__ = 'AI-Stratov'
 __description__ = 'Telethon session storage in Redis or Dragonfly'
 
 __all__ = [
+    'ConfigurationError',
     'ConnectionError',
     'RedisClient',
-    # Main classes
     'RedisSession',
-    # Exceptions
     'RedisthonError',
     'SerializationError',
-    # Metadata
+    'SessionError',
     '__version__',
 ]

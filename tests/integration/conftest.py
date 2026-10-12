@@ -48,12 +48,18 @@ def server(request: pytest.FixtureRequest) -> dict[str, Any]:
 
 
 @pytest.fixture
-def key_prefix(server: dict[str, Any]) -> Iterator[str]:
+def redis_conn(server: dict[str, Any]) -> Iterator[redis.Redis]:
+    """Plain redis-py connection for inspecting what the session wrote."""
+    conn = redis.Redis(host=server['host'], port=server['port'])
+    yield conn
+    conn.close()
+
+
+@pytest.fixture
+def key_prefix(redis_conn: redis.Redis) -> Iterator[str]:
     """Unique key prefix per test. Deletes its keys afterwards."""
     prefix = f'redisthon-test:{uuid.uuid4().hex}'
     yield prefix
-    conn = redis.Redis(host=server['host'], port=server['port'])
-    keys = list(conn.scan_iter(match=f'{prefix}:*'))
+    keys = list(redis_conn.scan_iter(match=f'{prefix}:*'))
     if keys:
-        conn.delete(*keys)
-    conn.close()
+        redis_conn.delete(*keys)

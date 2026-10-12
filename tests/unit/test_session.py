@@ -1,428 +1,422 @@
 """
-Unit tests for RedisSession. RedisClient is replaced with a mock.
+Unit tests for RedisSession.
+
+Behaviour is tested against fakeredis. Failure paths replace RedisClient with
+a Mock that raises.
 """
 
+import base64
+import logging
+import os
 from datetime import UTC, datetime
+from unittest.mock import Mock, patch
 
 import pytest
+from telethon import utils
 from telethon.crypto import AuthKey
-from telethon.tl.types import InputPeerUser, InputPhoto, User
+from telethon.sessions.memory import MemorySession
+from telethon.tl.types import (
+    Channel,
+    ChatPhotoEmpty,
+    InputDocument,
+    InputPeerChannel,
+    InputPeerUser,
+    InputPhoto,
+    User,
+)
 from telethon.tl.types.updates import State
 
-from redisthon import RedisSession
-from redisthon.exceptions import SessionError
+from redisthon import RedisClient, RedisSession, __version__
+from redisthon.exceptions import ConnectionError, SessionError
+
+DATE = datetime(2025, 1, 1, tzinfo=UTC)
+DATA_KEY = 'redisthon:session:test:data'
+ENTITIES_KEY = 'redisthon:session:test:entities'
+STATES_KEY = 'redisthon:session:test:update_states'
+FILES_KEY = 'redisthon:session:test:sent_files'
 
 
-class TestRedisSessionInitialization:
-    """Test session initialization and configuration."""
-
-    def test_init_with_string_name(self, mock_redis_client):
-        """Test initialization with string session name."""
-        session = RedisSession('test_session', redis_client=mock_redis_client)
-        assert session.session_name == 'test_session'
-        assert session.save_entities is True
-
-    def test_init_with_bytes_name(self, mock_redis_client):
-        """Test initialization with bytes session name."""
-        session = RedisSession(b'test_session', redis_client=mock_redis_client)
-        assert session.session_name == 'test_session'
-
-    def test_init_invalid_name_type(self):
-        """Test initialization with invalid session name type."""
-        with pytest.raises(
-            SessionError, match='Session name must be a string or bytes'
-        ):
-            RedisSession(123)
-
-    def test_key_generation(self, mock_redis_client):
-        """Test Redis key generation."""
-        session = RedisSession('test_session', redis_client=mock_redis_client)
-        assert session._session_key == 'redisthon:session:test_session:data'
-        assert session._entities_key == 'redisthon:session:test_session:entities'
-        assert (
-            session._update_states_key == 'redisthon:session:test_session:update_states'
-        )
-        assert session._sent_files_key == 'redisthon:session:test_session:sent_files'
+def make_state(pts: int = 1) -> State:
+    return State(pts=pts, qts=2, date=DATE, seq=3, unread_count=0)
 
 
-class TestSessionDataManagement:
-    """Test session data save/load operations."""
+def make_photo() -> InputPhoto:
+    return InputPhoto(id=1, access_hash=2, file_reference=b'')
 
-    def test_save_session_without_dc(self, redis_session):
-        """Test that save does nothing without DC information."""
-        redis_session.save()
-        redis_session._client.set_key.assert_not_called()
 
-    def test_save_session_with_dc(self, redis_session):
-        """Test saving session with DC information."""
-        redis_session.set_dc(2, 'test.telegram.org', 443)
+def make_channel(channel_id: int, access_hash: int) -> Channel:
+    return Channel(
+        id=channel_id,
+        title='News',
+        photo=ChatPhotoEmpty(),
+        date=DATE,
+        access_hash=access_hash,
+    )
 
-        redis_session._client.set_key.assert_called()
-        call_args = redis_session._client.set_key.call_args
-        key, data, _ttl = call_args[0]
 
-        assert key == redis_session._session_key
-        assert data['dc_id'] == 2
-        assert data['server_address'] == 'test.telegram.org'
-        assert data['port'] == 443
+@pytest.fixture
+def failing_client() -> Mock:
+    """RedisClient that loads an empty session and then fails every call."""
+    client = Mock(spec=RedisClient)
+    client.get_key.return_value = None
+    error = ConnectionError('down', host='localhost', port=6379)
+    for name in (
+        'set_key',
+        'expire_keys',
+        'expire_key',
+        'delete_keys',
+        'scan_keys',
+        'hash_get',
+        'hash_set_many',
+        'hash_scan',
+        'hash_len',
+        'key_exists',
+    ):
+        getattr(client, name).side_effect = error
+    return client
 
-    def test_load_session_data(self, mock_redis_client, session_data):
-        """Test loading existing session data."""
-        mock_redis_client.get_key.return_value = session_data
 
-        session = RedisSession('test_session', redis_client=mock_redis_client)
+class TestInit:
+    def test_bytes_name(self, client):
+        assert RedisSession(b'abc', redis_client=client).session_name == 'abc'
+
+    def test_invalid_name(self):
+        with pytest.raises(SessionError, match='string or bytes'):
+            RedisSession(123)  # type: ignore[arg-type]
+
+    def test_key_names(self, make_session):
+        session = make_session('acc', key_prefix='app')
+        assert session.get_health_info()['keys'] == {
+            'session': 'app:acc:data',
+            'entities': 'app:acc:entities',
+            'update_states': 'app:acc:update_states',
+            'sent_files': 'app:acc:sent_files',
+        }
+
+    def test_builds_own_client_from_settings(self):
+        with patch('redisthon.session.RedisClient') as client_cls:
+            client_cls.return_value.get_key.return_value = None
+            RedisSession('s', host='h', port=1, db=2, is_dragonfly=True)
+
+        kwargs = client_cls.call_args.kwargs
+        assert kwargs['host'] == 'h'
+        assert kwargs['port'] == 1
+        assert kwargs['db'] == 2
+        assert kwargs['is_dragonfly'] is True
+
+    def test_fresh_session_is_empty(self, session):
+        assert session.dc_id == 0
+        assert session.server_address is None
+        assert session.auth_key is None
+        assert session.takeout_id is None
+
+
+class TestSaveAndLoad:
+    def test_round_trip(self, make_session):
+        key = AuthKey(data=os.urandom(256))
+        session = make_session()
+        session.set_dc(2, '149.154.167.51', 443)
+        session.auth_key = key
+        session.takeout_id = 7
+        session.save()
+
+        loaded = make_session()
+        assert loaded.dc_id == 2
+        assert loaded.server_address == '149.154.167.51'
+        assert loaded.port == 443
+        assert loaded.auth_key.key == key.key
+        assert loaded.takeout_id == 7
+
+    def test_stored_document(self, session, client):
+        key = AuthKey(data=os.urandom(256))
+        session.set_dc(2, '1.2.3.4', 443)
+        session.auth_key = key
+        session.save()
+
+        data = client.get_key(DATA_KEY)
+        assert data['session_name'] == 'test'
+        assert base64.b64decode(data['auth_key']) == key.key
+        assert data['version'] == __version__
+
+    def test_session_without_auth_key(self, make_session):
+        make_session().set_dc(2, '1.2.3.4', 443)
+        assert make_session().auth_key is None
+
+    def test_save_without_dc_writes_nothing(self, session, fake_redis):
+        session.save()
+        assert fake_redis.keys() == []
+
+    def test_unreadable_auth_key_is_ignored(self, make_session, client, caplog):
+        client.set_key(DATA_KEY, {'dc_id': 2, 'auth_key': 'not base64!'})
+
+        with caplog.at_level(logging.WARNING):
+            session = make_session()
 
         assert session.dc_id == 2
-        assert session.server_address == 'test.telegram.org'
-        assert session.port == 443
-
-    def test_clone_session(self, redis_session):
-        """Test session cloning."""
-        redis_session.set_dc(2, 'test.telegram.org', 443)
-
-        cloned = redis_session.clone()
-
-        assert cloned.dc_id == 2
-        assert cloned.server_address == 'test.telegram.org'
-        assert cloned.port == 443
-        assert cloned.session_name == 'test_session_clone'
-
-
-class TestEntityManagement:
-    """Test entity caching and retrieval."""
-
-    def test_get_entity_by_id_found(self, redis_session, entity_data):
-        """Test getting entity by ID when found."""
-        redis_session._client.hash_get.return_value = entity_data
-
-        result = redis_session.get_entity_rows_by_id(123456789)
-
-        assert result == (123456789, 987654321)
-        redis_session._client.hash_get.assert_called_with(
-            redis_session._entities_key, '123456789'
-        )
-
-    def test_get_entity_by_id_not_found(self, redis_session):
-        """Test getting entity by ID when not found."""
-        redis_session._client.hash_get.return_value = None
-
-        result = redis_session.get_entity_rows_by_id(123456789)
-
-        assert result is None
-
-    def test_get_entity_by_username(self, redis_session, entity_data):
-        """Test getting entity by username."""
-        redis_session._client.hash_scan.return_value = [('123456789', entity_data)]
-
-        result = redis_session.get_entity_rows_by_username('test_user')
-
-        assert result == (123456789, 987654321)
-
-    def test_get_entity_by_phone(self, redis_session, entity_data):
-        """Test getting entity by phone number."""
-        redis_session._client.hash_scan.return_value = [('123456789', entity_data)]
-
-        result = redis_session.get_entity_rows_by_phone('+1234567890')
-
-        assert result == (123456789, 987654321)
-
-
-class TestGetInputEntity:
-    """MemorySession.get_input_entity unpacks one (id, hash) row."""
-
-    def test_resolves_cached_user_by_id(self, redis_session, entity_data):
-        redis_session._client.hash_get.return_value = entity_data
-
-        peer = redis_session.get_input_entity(123456789)
-
-        assert peer == InputPeerUser(123456789, 987654321)
-
-    def test_resolves_cached_user_by_username(self, redis_session, entity_data):
-        redis_session._client.hash_scan.return_value = [('123456789', entity_data)]
-
-        peer = redis_session.get_input_entity('test_user')
-
-        assert peer == InputPeerUser(123456789, 987654321)
-
-    def test_unknown_entity_raises_value_error(self, redis_session):
-        with pytest.raises(ValueError, match='Could not find input entity'):
-            redis_session.get_input_entity(123456789)
-
-
-class TestUpdateStateManagement:
-    """Test update state operations."""
-
-    def test_set_update_state(self, redis_session):
-        """Test setting update state."""
-        state = State(pts=100, qts=50, date=datetime.now(UTC), seq=25, unread_count=3)
-
-        redis_session.set_update_state(123456789, state)
-
-        redis_session._client.hash_set.assert_called()
-        call_args = redis_session._client.hash_set.call_args
-        key, field, data = call_args[0]
-
-        assert key == redis_session._update_states_key
-        assert field == '123456789'
-        assert data['pts'] == 100
-        assert data['qts'] == 50
-        assert data['seq'] == 25
-        assert data['unread_count'] == 3
-
-    def test_get_update_state_found(self, redis_session):
-        """Test getting update state when found."""
-        state_data = {
-            'entity_id': 123456789,
-            'pts': 100,
-            'qts': 50,
-            'date': '2025-08-23T19:00:00+00:00',
-            'seq': 25,
-            'unread_count': 3,
-        }
-        redis_session._client.hash_get.return_value = state_data
-
-        result = redis_session.get_update_state(123456789)
-
-        assert result is not None
-        assert result.pts == 100
-        assert result.qts == 50
-        assert result.seq == 25
-        assert result.unread_count == 3
-
-    def test_get_update_state_not_found(self, redis_session):
-        """Test getting update state when not found."""
-        redis_session._client.hash_get.return_value = None
-
-        result = redis_session.get_update_state(123456789)
-
-        assert result is None
-
-
-class TestFileCaching:
-    """Test file caching operations."""
-
-    def test_cache_photo_file(self, redis_session):
-        """Test caching photo file."""
-        md5_digest = b'test_md5_hash_here'
-        file_size = 1024
-        photo = InputPhoto(id=123, access_hash=456, file_reference=b'test_ref')
-
-        redis_session.cache_file(md5_digest, file_size, photo)
-
-        redis_session._client.hash_set.assert_called()
-        call_args = redis_session._client.hash_set.call_args
-        key, field, data = call_args[0]
-
-        assert key == redis_session._sent_files_key
-        assert field == f'{md5_digest.hex()}_{file_size}'
-        assert data['type'] == 'photo'
-        assert data['id'] == 123
-        assert data['access_hash'] == 456
-
-    def test_get_cached_photo(self, redis_session):
-        """Test getting cached photo file."""
-        file_data = {
-            'id': 123,
-            'access_hash': 456,
-            'file_reference': b'test_ref'.hex(),
-            'type': 'photo',
-        }
-        redis_session._client.hash_get.return_value = file_data
-
-        md5_digest = b'test_md5_hash_here'
-        file_size = 1024
-
-        result = redis_session.get_file(md5_digest, file_size, InputPhoto)
-
-        assert result is not None
-        assert isinstance(result, InputPhoto)
-        assert result.id == 123
-        assert result.access_hash == 456
-
-
-class TestSessionProperties:
-    """Test session properties and attributes."""
-
-    def test_session_properties(self, redis_session):
-        """Test session property accessors."""
-        redis_session.set_dc(2, 'test.telegram.org', 443)
-
-        assert redis_session.dc_id == 2
-        assert redis_session.server_address == 'test.telegram.org'
-        assert redis_session.port == 443
-        assert redis_session.takeout_id is None
-
-    def test_context_manager(self, mock_redis_client):
-        """Test context manager functionality."""
-        with RedisSession('test_session', redis_client=mock_redis_client) as session:
-            assert session.session_name == 'test_session'
-
-        mock_redis_client.close.assert_called_once()
-
-
-class TestHealthAndStatistics:
-    """Test health monitoring and statistics."""
-
-    def test_get_health_info(self, redis_session):
-        """Test health information retrieval."""
-        health = redis_session.get_health_info()
-
-        assert health['session_name'] == 'test_session'
-        assert health['connection_healthy'] is True
-        assert 'server_info' in health
-        assert 'client_info' in health
-        assert 'keys' in health
-        assert 'settings' in health
-
-    def test_get_statistics(self, redis_session):
-        """Test statistics retrieval."""
-        redis_session._client.key_exists.return_value = True
-        redis_session._client.hash_len.return_value = 5
-        redis_session.set_dc(2, 'test.telegram.org', 443)
-
-        stats = redis_session.get_statistics()
-
-        assert stats['session_name'] == 'test_session'
-        assert stats['session_exists'] is True
-        assert stats['entities_count'] == 5
-        assert stats['dc_id'] == 2
-
-
-class TestErrorHandling:
-    """Test error handling and edge cases."""
-
-    def test_load_session_with_invalid_auth_key(self, mock_redis_client):
-        """Test loading session with invalid auth key."""
-        session_data = {
-            'dc_id': 2,
-            'server_address': 'test.telegram.org',
-            'port': 443,
-            'auth_key': 'invalid_base64!',  # Invalid base64
-        }
-        mock_redis_client.get_key.return_value = session_data
-
-        # Should not raise exception, just log warning
-        session = RedisSession('test_session', redis_client=mock_redis_client)
         assert session.auth_key is None
+        assert 'unreadable auth key' in caplog.text
 
-    def test_entity_operations_with_client_errors(self, redis_session):
-        """Test entity operations when Redis client raises exceptions."""
-        redis_session._client.hash_get.side_effect = Exception('Redis error')
+    def test_non_map_document_raises(self, make_session, client):
+        client.set_key(DATA_KEY, [1, 2])
+        with pytest.raises(SessionError, match='expected a map, got list'):
+            make_session()
 
-        # Should not raise, just return empty results
-        result = redis_session.get_entity_rows_by_id(123456789)
-        assert result is None
+    def test_load_error_raises(self, failing_client):
+        failing_client.get_key.side_effect = ConnectionError('down')
+        with pytest.raises(SessionError, match='Failed to load') as exc_info:
+            RedisSession('s', redis_client=failing_client)
+        assert exc_info.value.session_name == 's'
 
-    def test_save_wraps_redis_errors(self, redis_session):
-        """A failed write surfaces as SessionError, it is not swallowed."""
-        redis_session._client.set_key.side_effect = Exception('Redis error')
-
-        with pytest.raises(SessionError) as exc_info:
-            redis_session.set_dc(2, 'test.telegram.org', 443)
-
-        assert exc_info.value.session_name == 'test_session'
-
-    def test_load_wraps_redis_errors(self, mock_redis_client):
-        mock_redis_client.get_key.side_effect = Exception('Redis error')
-
-        with pytest.raises(SessionError, match='Failed to load session data'):
-            RedisSession('test_session', redis_client=mock_redis_client)
+    def test_save_error_raises(self, failing_client):
+        session = RedisSession('s', redis_client=failing_client)
+        with pytest.raises(SessionError, match='Failed to save'):
+            session.set_dc(2, '1.2.3.4', 443)
 
 
 class TestTTL:
-    """ttl_seconds is applied to every key the session writes."""
+    def test_save_refreshes_ttl_on_all_keys(self, make_session, fake_redis):
+        session = make_session(ttl_seconds=60)
+        session.process_entities([User(id=1, access_hash=2)])
+        session.set_update_state(0, make_state())
+        session.cache_file(b'm', 1, make_photo())
+        for key in fake_redis.scan_iter():
+            fake_redis.persist(key)
 
-    def test_session_key_gets_ttl(self, mock_redis_client):
-        session = RedisSession('s', redis_client=mock_redis_client, ttl_seconds=60)
-        session.set_dc(2, 'test.telegram.org', 443)
+        session.set_dc(2, '1.2.3.4', 443)
 
-        key, _, ttl = mock_redis_client.set_key.call_args.args
-        assert key == session._session_key
-        assert ttl == 60
+        keys = fake_redis.keys()
+        assert len(keys) == 4
+        assert all(0 < fake_redis.ttl(key) <= 60 for key in keys)
 
-    def test_zero_ttl_disables_expiry(self, mock_redis_client):
-        session = RedisSession('s', redis_client=mock_redis_client, ttl_seconds=0)
-        session.set_dc(2, 'test.telegram.org', 443)
-        session.cache_file(
-            b'md5', 1, InputPhoto(id=1, access_hash=2, file_reference=b'')
+    def test_cache_writes_set_ttl(self, make_session, fake_redis):
+        make_session(ttl_seconds=60).process_entities([User(id=1, access_hash=2)])
+        assert 0 < fake_redis.ttl(ENTITIES_KEY) <= 60
+
+    def test_zero_ttl_disables_expiry(self, make_session, fake_redis):
+        session = make_session(ttl_seconds=0)
+        session.process_entities([User(id=1, access_hash=2)])
+        session.set_dc(2, '1.2.3.4', 443)
+
+        assert [fake_redis.ttl(key) for key in fake_redis.scan_iter()] == [-1, -1]
+
+
+class TestEntities:
+    def test_resolve_by_id_username_phone_and_name(self, make_session):
+        user = User(
+            id=10, access_hash=20, username='Alice', phone='155', first_name='Al'
         )
+        make_session().process_entities([user])
 
-        assert mock_redis_client.set_key.call_args.args[2] is None
-        mock_redis_client.expire_key.assert_not_called()
+        session = make_session()
+        expected = InputPeerUser(10, 20)
+        assert session.get_input_entity(10) == expected
+        assert session.get_input_entity('alice') == expected
+        assert session.get_input_entity('+155') == expected
+        assert session.get_input_entity('Al') == expected
 
-    def test_hashes_get_ttl(self, mock_redis_client):
-        session = RedisSession('s', redis_client=mock_redis_client, ttl_seconds=60)
-        session.process_entities([User(id=1, access_hash=2, username='alice')])
-        session.set_update_state(
-            0, State(pts=1, qts=1, date=datetime.now(UTC), seq=1, unread_count=0)
-        )
-        session.cache_file(
-            b'md5', 1, InputPhoto(id=1, access_hash=2, file_reference=b'')
-        )
+    def test_resolve_unmarked_channel_id(self, session):
+        session.process_entities([make_channel(555, 99)])
 
-        expired = {call.args for call in mock_redis_client.expire_key.call_args_list}
-        assert expired == {
-            (session._entities_key, 60),
-            (session._update_states_key, 60),
-            (session._sent_files_key, 60),
+        marked_id = utils.get_peer_id(InputPeerChannel(555, 99))
+        assert session.get_entity_rows_by_id(555, exact=False) == (marked_id, 99)
+        assert session.get_input_entity(555) == InputPeerChannel(555, 99)
+
+    def test_unknown_entity(self, session):
+        assert session.get_entity_rows_by_id(1) is None
+        assert session.get_entity_rows_by_id(1, exact=False) is None
+        assert session.get_entity_rows_by_username('nobody') is None
+        with pytest.raises(ValueError, match='Could not find input entity'):
+            session.get_input_entity(1)
+
+    def test_save_entities_false(self, make_session, fake_redis):
+        make_session(save_entities=False).process_entities([User(id=1, access_hash=2)])
+        assert fake_redis.keys() == []
+
+    def test_object_without_entities(self, session, fake_redis):
+        session.process_entities(object())
+        assert fake_redis.keys() == []
+
+    def test_malformed_entities_are_misses(self, session, client):
+        client.hash_set(ENTITIES_KEY, '1', {'id': 1})
+        client.hash_set(ENTITIES_KEY, '2', {'username': 'bob', 'id': 'x'})
+        client.hash_set(ENTITIES_KEY, '3', 'not a map')
+
+        assert session.get_entity_rows_by_id(1) is None
+        assert session.get_entity_rows_by_username('bob') is None
+
+
+class TestUpdateStates:
+    def test_round_trip(self, make_session):
+        writer = make_session()
+        writer.set_update_state(0, make_state(pts=10))
+        writer.set_update_state(-100555, make_state(pts=5))
+
+        session = make_session()
+        assert session.get_update_state(0) == make_state(pts=10)
+        assert session.get_update_state(1) is None
+        # TelegramClient.connect() iterates these as (entity_id, state) pairs
+        assert dict(session.get_update_states()) == {
+            0: make_state(pts=10),
+            -100555: make_state(pts=5),
         }
 
+    def test_state_without_date(self, session):
+        state = State(pts=1, qts=0, date=None, seq=0, unread_count=0)
+        session.set_update_state(1, state)
+        assert session.get_update_state(1) == state
 
-class TestProcessEntities:
-    def test_users_are_written_to_entities_hash(self, redis_session):
-        user = User(
-            id=10, access_hash=20, username='Alice', phone='123', first_name='Al'
-        )
-        redis_session.process_entities([user])
+    def test_malformed_states_are_skipped(self, session, client):
+        session.set_update_state(1, make_state())
+        client.hash_set(STATES_KEY, 'x', {'pts': 1})
+        client.hash_set(STATES_KEY, '2', {'pts': 1})
 
-        key, field, data = redis_session._client.hash_set.call_args.args
-        assert key == redis_session._entities_key
-        assert field == '10'
-        assert data['access_hash'] == 20
-        assert data['username'] == 'alice'
-        assert data['phone'] == '123'
-        assert data['name'] == 'Al'
-
-    def test_save_entities_false_skips_writes(self, mock_redis_client):
-        session = RedisSession('s', redis_client=mock_redis_client, save_entities=False)
-        session.process_entities([User(id=10, access_hash=20)])
-
-        mock_redis_client.hash_set.assert_not_called()
+        assert dict(session.get_update_states()) == {1: make_state()}
+        assert session.get_update_state(2) is None
 
 
-class TestTelethonContract:
-    """Attributes and methods TelegramClient relies on."""
+class TestSentFiles:
+    @pytest.mark.parametrize(
+        'instance',
+        [
+            InputPhoto(id=1, access_hash=2, file_reference=b'\x01'),
+            InputDocument(id=3, access_hash=4, file_reference=b''),
+        ],
+    )
+    def test_round_trip(self, make_session, instance):
+        make_session().cache_file(b'\xaa' * 16, 10, instance)
 
-    def test_auth_key_is_assignable(self, redis_session):
-        """TelegramClient.connect() assigns session.auth_key."""
-        key = AuthKey(data=bytes(256))
-        redis_session.auth_key = key
-        assert redis_session.auth_key is key
+        session = make_session()
+        assert session.get_file(b'\xaa' * 16, 10, type(instance)) == instance
+        assert session.get_file(b'\xaa' * 16, 11, type(instance)) is None
 
-        redis_session.auth_key = None
-        assert redis_session.auth_key is None
+    def test_photo_and_document_with_same_hash_do_not_collide(self, session):
+        photo = make_photo()
+        document = InputDocument(id=3, access_hash=4, file_reference=b'')
+        session.cache_file(b'm', 1, photo)
+        session.cache_file(b'm', 1, document)
 
-    def test_takeout_id_is_assignable(self, redis_session):
-        """TelegramClient.takeout() assigns session.takeout_id."""
-        redis_session.takeout_id = 42
-        assert redis_session.takeout_id == 42
+        assert session.get_file(b'm', 1, InputPhoto) == photo
+        assert session.get_file(b'm', 1, InputDocument) == document
 
-    def test_get_update_states_yields_pairs(self, redis_session):
-        """TelegramClient.connect() does 'for entity_id, state in ...'."""
-        redis_session._client.hash_scan.return_value = [
-            (
-                '0',
-                {
-                    'pts': 1,
-                    'qts': 2,
-                    'date': '2025-08-23T19:00:00+00:00',
-                    'seq': 3,
-                    'unread_count': 0,
-                },
-            )
-        ]
-        pairs = list(redis_session.get_update_states())
-        assert len(pairs) == 1
-        entity_id, state = pairs[0]
-        assert entity_id == 0
-        assert state.pts == 1
+    def test_unsupported_type(self, session, fake_redis, caplog):
+        with caplog.at_level(logging.WARNING):
+            session.cache_file(b'm', 1, User(id=1))
+
+        assert session.get_file(b'm', 1, User) is None
+        assert fake_redis.keys() == []
+        assert 'Not caching file of type User' in caplog.text
+
+    def test_malformed_entry_is_a_miss(self, session, client):
+        client.hash_set(FILES_KEY, f'{b"m".hex()}_1_photo', {'id': 1})
+        assert session.get_file(b'm', 1, InputPhoto) is None
+
+
+class TestLifecycle:
+    def test_clone_is_an_empty_memory_session(self, session, fake_redis):
+        session.set_dc(2, '1.2.3.4', 443)
+        cloned = session.clone()
+        # Telethon does this for CDN connections
+        cloned.set_dc(5, '5.5.5.5', 443)
+
+        assert type(cloned) is MemorySession
+        assert cloned.save_entities is True
+        assert fake_redis.keys() == [DATA_KEY.encode()]
+
+    def test_clone_into_instance(self, session):
+        target = MemorySession()
+        assert session.clone(target) is target
+
+    def test_delete_removes_all_keys(self, session, fake_redis):
+        session.set_dc(2, '1.2.3.4', 443)
+        session.process_entities([User(id=1, access_hash=2)])
+
+        session.delete()
+
+        assert fake_redis.keys() == []
+
+    def test_delete_failure_is_logged(self, failing_client, caplog):
+        session = RedisSession('s', redis_client=failing_client)
+        with caplog.at_level(logging.ERROR):
+            session.delete()
+        assert "Failed to delete session 's'" in caplog.text
+
+    def test_list_sessions(self, make_session):
+        for name in ('b', 'a:with:colons'):
+            make_session(name).set_dc(2, '1.2.3.4', 443)
+        make_session('c', key_prefix='other').set_dc(2, '1.2.3.4', 443)
+
+        assert make_session('unsaved').list_sessions() == ['a:with:colons', 'b']
+
+    def test_list_sessions_failure(self, failing_client):
+        session = RedisSession('s', redis_client=failing_client)
+        assert session.list_sessions() == ['s']
+
+    def test_close_leaves_injected_client_open(self):
+        client = Mock(spec=RedisClient)
+        client.get_key.return_value = None
+
+        with RedisSession('s', redis_client=client):
+            pass
+
+        client.close.assert_not_called()
+
+    def test_close_closes_own_client(self):
+        with patch('redisthon.session.RedisClient') as client_cls:
+            client_cls.return_value.get_key.return_value = None
+            with RedisSession('s'):
+                pass
+
+        client_cls.return_value.close.assert_called_once()
+
+
+class TestCacheFailures:
+    """Cache reads and writes never raise; Telethon falls back to the network."""
+
+    def test_reads_are_misses(self, failing_client, caplog):
+        session = RedisSession('s', redis_client=failing_client)
+
+        with caplog.at_level(logging.WARNING):
+            assert session.get_entity_rows_by_id(1) is None
+            assert session.get_entity_rows_by_username('a') is None
+            assert session.get_update_state(0) is None
+            assert list(session.get_update_states()) == []
+            assert session.get_file(b'm', 1, InputPhoto) is None
+        assert 'Failed to read' in caplog.text
+
+    def test_writes_are_logged(self, failing_client, caplog):
+        session = RedisSession('s', redis_client=failing_client)
+
+        with caplog.at_level(logging.WARNING):
+            session.process_entities([User(id=1, access_hash=2)])
+            session.set_update_state(0, make_state())
+            session.cache_file(b'm', 1, make_photo())
+        assert caplog.text.count('Failed to write') == 3
+
+
+class TestDiagnostics:
+    def test_health_info(self, session):
+        health = session.get_health_info()
+
+        assert health['session_name'] == 'test'
+        assert health['connection_healthy'] is True
+        assert health['client_info']['serializer'] == 'msgpack'
+        assert health['settings'] == {'ttl_seconds': 86400 * 30, 'save_entities': True}
+
+    def test_statistics(self, session):
+        session.set_dc(2, '1.2.3.4', 443)
+        session.auth_key = AuthKey(data=os.urandom(256))
+        session.process_entities([User(id=1, access_hash=2), User(id=3, access_hash=4)])
+
+        assert session.get_statistics() == {
+            'session_name': 'test',
+            'session_exists': True,
+            'entities_count': 2,
+            'update_states_count': 0,
+            'sent_files_count': 0,
+            'has_auth_key': True,
+            'dc_id': 2,
+        }
+
+    def test_statistics_error(self, failing_client):
+        stats = RedisSession('s', redis_client=failing_client).get_statistics()
+        assert stats == {'session_name': 's', 'error': 'down'}
