@@ -266,10 +266,20 @@ class RedisSession(MemorySession):  # type: ignore[misc]
         """Get authentication key."""
         return getattr(self, '_auth_key', None)
 
+    @auth_key.setter
+    def auth_key(self, value: Any) -> None:
+        """Set authentication key. Telethon assigns it on connect and login."""
+        self._auth_key = value
+
     @property
     def takeout_id(self) -> int | None:
         """Get takeout ID."""
         return getattr(self, '_takeout_id', None)
+
+    @takeout_id.setter
+    def takeout_id(self, value: int | None) -> None:
+        """Set takeout ID. Telethon assigns it in ``client.takeout()``."""
+        self._takeout_id = value
 
     # Entity management methods
 

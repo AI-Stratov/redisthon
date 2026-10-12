@@ -5,6 +5,7 @@ Tests for RedisSession core functionality.
 from datetime import UTC, datetime
 
 import pytest
+from telethon.crypto import AuthKey
 from telethon.tl.types import InputPhoto
 from telethon.tl.types.updates import State
 
@@ -301,3 +302,21 @@ class TestErrorHandling:
         # Should raise SessionError with proper context
         with pytest.raises(SessionError):
             redis_session.save()
+
+
+class TestTelethonContract:
+    """Attributes and methods TelegramClient relies on."""
+
+    def test_auth_key_is_assignable(self, redis_session):
+        """TelegramClient.connect() assigns session.auth_key."""
+        key = AuthKey(data=bytes(256))
+        redis_session.auth_key = key
+        assert redis_session.auth_key is key
+
+        redis_session.auth_key = None
+        assert redis_session.auth_key is None
+
+    def test_takeout_id_is_assignable(self, redis_session):
+        """TelegramClient.takeout() assigns session.takeout_id."""
+        redis_session.takeout_id = 42
+        assert redis_session.takeout_id == 42
