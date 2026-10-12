@@ -45,7 +45,7 @@ Other `RedisSession` options: `db`, `username`, `password`, `key_prefix`
 expiry), `save_entities` (default `True`), `is_dragonfly`, and pool settings
 (`max_connections`, `connection_timeout`, `socket_keepalive`).
 To share one connection pool between sessions, create a `RedisClient` and pass
-it as `redis_client=`.
+it as `redis_client=`. Sessions do not close a client they were given.
 
 ## Features
 
@@ -55,11 +55,17 @@ it as `redis_client=`.
   `get_input_entity()` resolves them by ID, username, phone or name.
 - Update states (pts, qts, seq, date) are stored per entity.
 - Sent-file cache for photos and documents.
-- Every key gets `ttl_seconds`, refreshed on each write.
+- Every key gets `ttl_seconds`. Each `save()` refreshes the TTL of all four
+  keys, so an active session keeps its caches.
+- `delete()`, which `client.log_out()` calls, removes all keys of the session.
+- `list_sessions()` returns the names of all sessions under the key prefix.
+- `clone()` returns an empty in-memory session, like `SQLiteSession.clone()`.
+  Telethon uses it for CDN connections, which therefore never touch Redis.
 - Dragonfly: `is_dragonfly=True` only skips `SELECT db`. The integration tests
   run against both Redis and Dragonfly.
 - `get_health_info()` (ping, server info, key names) and `get_statistics()`
   (cached entity, update state and file counts).
+- Type hints ship with the package (`py.typed`) and pass `mypy --strict`.
 
 Keys for a session named `name` with the default prefix:
 
@@ -67,7 +73,7 @@ Keys for a session named `name` with the default prefix:
 redisthon:session:name:data           msgpack: auth key, DC, takeout ID
 redisthon:session:name:entities       hash: entity ID -> base64(msgpack)
 redisthon:session:name:update_states  hash: entity ID -> base64(msgpack)
-redisthon:session:name:sent_files     hash: <md5 hex>_<size> -> base64(msgpack)
+redisthon:session:name:sent_files     hash: <md5 hex>_<size>_<photo|document> -> base64(msgpack)
 ```
 
 ## Limitations
@@ -77,9 +83,6 @@ redisthon:session:name:sent_files     hash: <md5 hex>_<size> -> base64(msgpack)
 - With the default TTL, a session that nobody starts for 30 days expires and the
   account has to log in again. Set `ttl_seconds=0` to keep it.
 - Lookups by username, phone or name scan the whole entity hash.
-- `delete()`, which `client.log_out()` calls, closes the connection pool but
-  leaves the keys in Redis.
-- `list_sessions()` returns only the current session's name.
 - Redis errors while reading or writing entities, update states and sent files
   are logged and treated as a cache miss. Errors in `save()` and in loading the
   session raise `SessionError`.
@@ -96,8 +99,8 @@ Tested in CI:
 | Python    | 3.11, 3.12, 3.13, 3.14                       |
 | Telethon  | 1.34.0 (lowest allowed), 1.45.0 (locked)     |
 | redis-py  | 5.0.0 (lowest allowed), 8.1.0 (locked)       |
-| Redis     | 6.2, 7.4, 8.2                                |
-| Dragonfly | 1.34                                         |
+| Redis     | 6.2, 7.4, 8.10                               |
+| Dragonfly | 2.0                                          |
 
 ## Development
 
@@ -107,15 +110,15 @@ Uses [uv](https://docs.astral.sh/uv/).
 uv sync
 uv run ruff check . && uv run ruff format --check .
 uv run mypy redisthon
-uv run pytest                    # unit tests, no server needed
+uv run pytest --cov=redisthon    # unit tests, no server needed, 100% coverage required
 ```
 
 Integration tests need Redis on `REDIS_HOST:REDIS_PORT` (default
 `localhost:6379`). Dragonfly tests run when `DRAGONFLY_PORT` is set.
 
 ```bash
-docker run -d -p 6379:6379 redis:7.4
-docker run -d -p 6380:6379 --ulimit memlock=-1 docker.dragonflydb.io/dragonflydb/dragonfly:v1.34.1
+docker run -d -p 6379:6379 redis:8.10
+docker run -d -p 6380:6379 --ulimit memlock=-1 docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.2
 DRAGONFLY_PORT=6380 uv run pytest tests/integration
 ```
 
