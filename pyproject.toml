@@ -58,7 +58,7 @@ select = [
     "E", "W", "F", "I", "N", "UP", "ASYNC", "B", "C4", "PIE", "T20", "Q", "RUF",
     "PERF", "FURB",
 ]
-ignore = ["E501", "N806", "N803", "UP038"]
+ignore = ["E501", "N806", "N803"]
 
 [tool.ruff.lint.flake8-quotes]
 inline-quotes = "single"
