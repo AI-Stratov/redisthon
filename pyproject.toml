@@ -34,10 +34,11 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pytest>=8.0.0",
-    "pytest-cov>=5.0.0",
-    "mypy>=1.11.0",
-    "ruff>=0.6.0",
+    "fakeredis>=2.39.0",
+    "mypy>=2.4.0",
+    "pytest>=9.1.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.0",
 ]
 
 [project.urls]
@@ -89,7 +90,7 @@ module = [
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-minversion = "8.0"
+minversion = "9.0"
 # Unit tests only by default. Integration tests need a server:
 #   pytest tests/integration
 testpaths = ["tests/unit"]
