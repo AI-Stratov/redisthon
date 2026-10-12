@@ -277,7 +277,8 @@ class RedisClient:
                 )
                 for field, value in fields.items():
                     try:
-                        deserialized_value = self.deserialize(value)
+                        # hash_set stores base64 text, see hash_set
+                        deserialized_value = self.deserialize(base64.b64decode(value))
                         field_str = (
                             field.decode() if isinstance(field, bytes) else str(field)
                         )

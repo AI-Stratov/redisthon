@@ -6,6 +6,7 @@ Implements all required Telethon session methods with Redis/Dragonfly backend.
 
 import base64
 import logging
+from collections.abc import ItemsView
 from datetime import UTC, datetime
 from typing import Any
 
@@ -420,14 +421,14 @@ class RedisSession(MemorySession):  # type: ignore[misc]
             logger.debug(f'Failed to get update state for entity {entity_id}: {e}')
             return None
 
-    def get_update_states(self) -> dict[int, State]:
+    def get_update_states(self) -> ItemsView[int, State]:
         """
         Get all update states.
 
-        :returns: Dictionary mapping entity_id to State
+        :returns: (entity_id, State) pairs, as MemorySession returns them
         """
+        states: dict[int, State] = {}
         try:
-            states = {}
             for field, state_data in self._client.hash_scan(self._update_states_key):
                 try:
                     entity_id = int(field)
@@ -442,10 +443,9 @@ class RedisSession(MemorySession):  # type: ignore[misc]
                     )
                 except (ValueError, KeyError):
                     continue
-            return states
         except Exception as e:
             logger.debug(f'Failed to get update states: {e}')
-            return {}
+        return states.items()
 
     def set_update_state(self, entity_id: int, state: State) -> None:
         """

@@ -320,3 +320,23 @@ class TestTelethonContract:
         """TelegramClient.takeout() assigns session.takeout_id."""
         redis_session.takeout_id = 42
         assert redis_session.takeout_id == 42
+
+    def test_get_update_states_yields_pairs(self, redis_session):
+        """TelegramClient.connect() does 'for entity_id, state in ...'."""
+        redis_session._client.hash_scan.return_value = [
+            (
+                '0',
+                {
+                    'pts': 1,
+                    'qts': 2,
+                    'date': '2025-08-23T19:00:00+00:00',
+                    'seq': 3,
+                    'unread_count': 0,
+                },
+            )
+        ]
+        pairs = list(redis_session.get_update_states())
+        assert len(pairs) == 1
+        entity_id, state = pairs[0]
+        assert entity_id == 0
+        assert state.pts == 1

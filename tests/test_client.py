@@ -330,3 +330,29 @@ class TestContextManager:
                     pass
 
                 mock_pool.disconnect.assert_called_once()
+
+
+class TestHashRoundTrip:
+    """Values written by hash_set must be readable by hash_get and hash_scan."""
+
+    @pytest.fixture
+    def client(self):
+        store: dict[bytes, bytes] = {}
+
+        def hset(key, field, value):
+            store[field.encode()] = value.encode() if isinstance(value, str) else value
+
+        fake = Mock()
+        fake.hset.side_effect = hset
+        fake.hget.side_effect = lambda key, field: store.get(field.encode())
+        fake.hscan.side_effect = lambda key, cursor: (0, dict(store))
+        return RedisClient(redis_client=fake)
+
+    def test_hash_get_reads_hash_set(self, client):
+        client.hash_set('h', 'a', {'username': 'alice', 'id': 1})
+        assert client.hash_get('h', 'a') == {'username': 'alice', 'id': 1}
+
+    def test_hash_scan_reads_hash_set(self, client):
+        client.hash_set('h', 'a', {'id': 1})
+        client.hash_set('h', 'b', {'id': 2})
+        assert sorted(client.hash_scan('h')) == [('a', {'id': 1}), ('b', {'id': 2})]
