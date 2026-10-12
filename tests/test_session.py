@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 from telethon.crypto import AuthKey
-from telethon.tl.types import InputPhoto
+from telethon.tl.types import InputPeerUser, InputPhoto
 from telethon.tl.types.updates import State
 
 from redisthon import RedisSession
@@ -97,8 +97,7 @@ class TestEntityManagement:
 
         result = redis_session.get_entity_rows_by_id(123456789)
 
-        assert len(result) == 1
-        assert result[0] == (123456789, 987654321)
+        assert result == (123456789, 987654321)
         redis_session._client.hash_get.assert_called_with(
             redis_session._entities_key, '123456789'
         )
@@ -109,7 +108,7 @@ class TestEntityManagement:
 
         result = redis_session.get_entity_rows_by_id(123456789)
 
-        assert result == []
+        assert result is None
 
     def test_get_entity_by_username(self, redis_session, entity_data):
         """Test getting entity by username."""
@@ -117,8 +116,7 @@ class TestEntityManagement:
 
         result = redis_session.get_entity_rows_by_username('test_user')
 
-        assert len(result) == 1
-        assert result[0] == (123456789, 987654321)
+        assert result == (123456789, 987654321)
 
     def test_get_entity_by_phone(self, redis_session, entity_data):
         """Test getting entity by phone number."""
@@ -126,8 +124,29 @@ class TestEntityManagement:
 
         result = redis_session.get_entity_rows_by_phone('+1234567890')
 
-        assert len(result) == 1
-        assert result[0] == (123456789, 987654321)
+        assert result == (123456789, 987654321)
+
+
+class TestGetInputEntity:
+    """MemorySession.get_input_entity unpacks one (id, hash) row."""
+
+    def test_resolves_cached_user_by_id(self, redis_session, entity_data):
+        redis_session._client.hash_get.return_value = entity_data
+
+        peer = redis_session.get_input_entity(123456789)
+
+        assert peer == InputPeerUser(123456789, 987654321)
+
+    def test_resolves_cached_user_by_username(self, redis_session, entity_data):
+        redis_session._client.hash_scan.return_value = [('123456789', entity_data)]
+
+        peer = redis_session.get_input_entity('test_user')
+
+        assert peer == InputPeerUser(123456789, 987654321)
+
+    def test_unknown_entity_raises_value_error(self, redis_session):
+        with pytest.raises(ValueError, match='Could not find input entity'):
+            redis_session.get_input_entity(123456789)
 
 
 class TestUpdateStateManagement:
@@ -292,7 +311,7 @@ class TestErrorHandling:
 
         # Should not raise, just return empty results
         result = redis_session.get_entity_rows_by_id(123456789)
-        assert result == []
+        assert result is None
 
     def test_save_session_handles_errors_gracefully(self, redis_session):
         """Test that save handles Redis errors gracefully."""

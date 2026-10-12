@@ -321,70 +321,70 @@ class RedisSession(MemorySession):  # type: ignore[misc]
 
     def get_entity_rows_by_id(
         self, entity_id: int, exact: bool = True
-    ) -> list[tuple[int, int]]:
+    ) -> tuple[int, int] | None:
         """
         Get entity by ID.
 
         :param entity_id: Entity ID
         :param exact: Exact match (ignored, always exact)
-        :returns: List of (entity_id, access_hash) tuples
+        :returns: (entity_id, access_hash), or None if not cached
         """
         try:
             entity_data = self._client.hash_get(self._entities_key, str(entity_id))
             if entity_data:
-                return [(entity_data['id'], entity_data['access_hash'])]
-            return []
+                return entity_data['id'], entity_data['access_hash']
+            return None
         except Exception as e:
             logger.debug(f'Entity lookup by ID failed: {e}')
-            return []
+            return None
 
-    def get_entity_rows_by_username(self, username: str) -> list[tuple[int, int]]:
+    def get_entity_rows_by_username(self, username: str) -> tuple[int, int] | None:
         """
         Get entity by username.
 
         :param username: Username to search for
-        :returns: List of (entity_id, access_hash) tuples
+        :returns: (entity_id, access_hash), or None if not cached
         """
         try:
             for _field, entity_data in self._client.hash_scan(self._entities_key):
                 if entity_data.get('username') == username:
-                    return [(entity_data['id'], entity_data['access_hash'])]
-            return []
+                    return entity_data['id'], entity_data['access_hash']
+            return None
         except Exception as e:
             logger.debug(f'Entity lookup by username failed: {e}')
-            return []
+            return None
 
-    def get_entity_rows_by_phone(self, phone: str) -> list[tuple[int, int]]:
+    def get_entity_rows_by_phone(self, phone: str) -> tuple[int, int] | None:
         """
         Get entity by phone.
 
         :param phone: Phone number to search for
-        :returns: List of (entity_id, access_hash) tuples
+        :returns: (entity_id, access_hash), or None if not cached
         """
         try:
             for _field, entity_data in self._client.hash_scan(self._entities_key):
                 if entity_data.get('phone') == phone:
-                    return [(entity_data['id'], entity_data['access_hash'])]
-            return []
+                    return entity_data['id'], entity_data['access_hash']
+            return None
         except Exception as e:
             logger.debug(f'Entity lookup by phone failed: {e}')
-            return []
+            return None
 
-    def get_entity_rows_by_name(self, name: str) -> list[tuple[int, int]]:
+    def get_entity_rows_by_name(self, name: str) -> tuple[int, int] | None:
         """
         Get entity by name.
 
         :param name: Name to search for
-        :returns: List of (entity_id, access_hash) tuples
+        :returns: (entity_id, access_hash), or None if not cached
         """
         try:
             for _field, entity_data in self._client.hash_scan(self._entities_key):
                 if entity_data.get('name') == name:
-                    return [(entity_data['id'], entity_data['access_hash'])]
-            return []
+                    return entity_data['id'], entity_data['access_hash']
+            return None
         except Exception as e:
             logger.debug(f'Entity lookup by name failed: {e}')
-            return []
+            return None
 
     def get_input_entity(self, key: Any) -> Any:
         """
