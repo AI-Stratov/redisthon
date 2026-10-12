@@ -47,7 +47,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        redis: ["6.2", "7.4", "8.2"]
+        redis: ["6.2", "7.4", "8.10"]
         deps: [locked]
         include:
           # Oldest supported Python with the lowest allowed dependency versions
@@ -64,7 +64,7 @@ jobs:
           --health-timeout 3s
           --health-retries 15
       dragonfly:
-        image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.34.1
+        image: docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.2
         ports: ["6380:6379"]
         options: --ulimit memlock=-1
     env:
