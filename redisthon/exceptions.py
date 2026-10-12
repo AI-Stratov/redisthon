@@ -2,6 +2,12 @@
 Exception hierarchy for redisthon.
 """
 
+from typing import Any
+
+
+def _details(**values: Any) -> dict[str, str]:
+    return {name: str(value) for name, value in values.items() if value is not None}
+
 
 class RedisthonError(Exception):
     """
@@ -19,7 +25,7 @@ class RedisthonError(Exception):
 
 class ConnectionError(RedisthonError):
     """
-    Raised when Redis/Dragonfly connection fails.
+    Raised when a Redis/Dragonfly command fails.
 
     :param message: Error message
     :param host: Redis host
@@ -27,36 +33,23 @@ class ConnectionError(RedisthonError):
     """
 
     def __init__(
-            self,
-            message: str,
-            host: str | None = None,
-            port: int | None = None
+        self, message: str, host: str | None = None, port: int | None = None
     ) -> None:
-        details = {}
-        if host:
-            details['host'] = host
-        if port:
-            details['port'] = str(port)
-
-        super().__init__(message, details)
+        super().__init__(message, _details(host=host, port=port))
         self.host = host
         self.port = port
 
 
 class SerializationError(RedisthonError):
     """
-    Raised when data serialization/deserialization fails.
+    Raised when data cannot be serialized or deserialized.
 
     :param message: Error message
     :param serializer: Serializer name
     """
 
     def __init__(self, message: str, serializer: str | None = None) -> None:
-        details = {}
-        if serializer:
-            details['serializer'] = serializer
-
-        super().__init__(message, details)
+        super().__init__(message, _details(serializer=serializer))
         self.serializer = serializer
 
 
@@ -69,26 +62,18 @@ class ConfigurationError(RedisthonError):
     """
 
     def __init__(self, message: str, parameter: str | None = None) -> None:
-        details = {}
-        if parameter:
-            details['parameter'] = parameter
-
-        super().__init__(message, details)
+        super().__init__(message, _details(parameter=parameter))
         self.parameter = parameter
 
 
 class SessionError(RedisthonError):
     """
-    Raised when session operations fail.
+    Raised when the session cannot be loaded or saved.
 
     :param message: Error message
     :param session_name: Session name
     """
 
     def __init__(self, message: str, session_name: str | None = None) -> None:
-        details = {}
-        if session_name:
-            details['session_name'] = session_name
-
-        super().__init__(message, details)
+        super().__init__(message, _details(session_name=session_name))
         self.session_name = session_name

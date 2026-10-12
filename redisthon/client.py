@@ -1,23 +1,29 @@
 """
-Redis/Dragonfly client with connection management.
+Redis/Dragonfly client used by RedisSession.
 """
 
 import base64
+import binascii
 import logging
-from typing import Any, Dict, Optional, cast
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
+from typing import Any
 
 import msgpack
 import redis
-from redis.connection import ConnectionPool
+from redis.typing import EncodableT, FieldT
 
-from .exceptions import ConnectionError, SerializationError, ConfigurationError
+from .exceptions import ConfigurationError, ConnectionError, SerializationError
 
 logger = logging.getLogger(__name__)
 
 
 class RedisClient:
     """
-    Redis/Dragonfly client with optimized connection management.
+    Redis/Dragonfly client with a connection pool and msgpack serialization.
+
+    Plain keys hold msgpack bytes. Hash fields hold base64 text of msgpack
+    bytes.
 
     :param host: Redis/Dragonfly server host
     :param port: Server port
@@ -31,362 +37,320 @@ class RedisClient:
     :param connection_timeout: Connection timeout in seconds
     :param socket_timeout: Socket timeout in seconds
     :param is_dragonfly: Whether using Dragonfly instead of Redis
-    :param redis_client: Existing Redis client to use
+    :param redis_client: Existing Redis client to use. The caller keeps
+        ownership: close() does not disconnect it.
     """
 
     __slots__ = (
-        '_redis_client',
         '_connection_pool',
-        '_config',
+        '_db',
+        '_host',
         '_is_dragonfly',
+        '_max_connections',
+        '_port',
+        '_redis_client',
+        '_socket_keepalive',
     )
 
     def __init__(
-            self,
-            *,
-            host: str = 'localhost',
-            port: int = 6379,
-            db: int = 0,
-            password: Optional[str] = None,
-            username: Optional[str] = None,
-            max_connections: int = 50,
-            socket_keepalive: bool = True,
-            socket_keepalive_options: Optional[Dict[str, Any]] = None,
-            health_check_interval: int = 30,
-            connection_timeout: int = 5,
-            socket_timeout: int = 5,
-            is_dragonfly: bool = False,
-            redis_client: Optional[redis.Redis] = None,
+        self,
+        *,
+        host: str = 'localhost',
+        port: int = 6379,
+        db: int = 0,
+        password: str | None = None,
+        username: str | None = None,
+        max_connections: int = 50,
+        socket_keepalive: bool = True,
+        socket_keepalive_options: dict[str, Any] | None = None,
+        health_check_interval: int = 30,
+        connection_timeout: int = 5,
+        socket_timeout: int = 5,
+        is_dragonfly: bool = False,
+        redis_client: redis.Redis | None = None,
     ) -> None:
+        self._host = host
+        self._port = port
+        self._db = 0 if is_dragonfly else db
+        self._max_connections = max_connections
+        self._socket_keepalive = socket_keepalive
         self._is_dragonfly = is_dragonfly
-
-        # Store configuration with proper types
-        self._config: dict[str, Any] = {
-            'host': host,
-            'port': port,
-            'db': db if not is_dragonfly else 0,
-            'password': password,
-            'username': username,
-            'max_connections': max_connections,
-            'socket_keepalive': socket_keepalive,
-            'socket_keepalive_options': socket_keepalive_options or {},
-            'health_check_interval': health_check_interval,
-            'connection_timeout': connection_timeout,
-            'socket_timeout': socket_timeout,
-        }
+        self._connection_pool: redis.ConnectionPool | None = None
 
         if redis_client is not None:
             self._redis_client = redis_client
-            self._connection_pool: Optional[ConnectionPool] = None
-        else:
-            self._setup_connection_pool()
+            return
 
-    def _setup_connection_pool(self) -> None:
-        """Setup connection pool."""
+        pool_kwargs: dict[str, Any] = {
+            'host': host,
+            'port': port,
+            'password': password,
+            'socket_keepalive': socket_keepalive,
+            'socket_keepalive_options': socket_keepalive_options or {},
+            'health_check_interval': health_check_interval,
+            'max_connections': max_connections,
+            'socket_connect_timeout': connection_timeout,
+            'socket_timeout': socket_timeout,
+            'decode_responses': False,
+        }
+        # Dragonfly is always used with the default database
+        if not is_dragonfly:
+            pool_kwargs['db'] = db
+        if username:
+            pool_kwargs['username'] = username
+
         try:
-            pool_kwargs = {
-                'host': self._config['host'],
-                'port': self._config['port'],
-                'password': self._config['password'],
-                'socket_keepalive': self._config['socket_keepalive'],
-                'socket_keepalive_options': self._config['socket_keepalive_options'],
-                'health_check_interval': self._config['health_check_interval'],
-                'max_connections': self._config['max_connections'],
-                'socket_connect_timeout': self._config['connection_timeout'],
-                'socket_timeout': self._config['socket_timeout'],
-                'decode_responses': False,
-            }
-
-            # Dragonfly doesn't support database selection
-            if not self._is_dragonfly:
-                pool_kwargs['db'] = self._config['db']
-
-            if self._config['username']:
-                pool_kwargs['username'] = self._config['username']
-
-            self._connection_pool = ConnectionPool(**pool_kwargs)
-            self._redis_client = redis.Redis(connection_pool=self._connection_pool)
-
-            logger.debug(f"Created connection pool for {'Dragonfly' if self._is_dragonfly else 'Redis'}")
-
-        except Exception as e:
+            self._connection_pool = redis.ConnectionPool(**pool_kwargs)
+        except (TypeError, ValueError) as e:
             raise ConfigurationError(
-                f"Failed to setup connection pool: {e}",
-                parameter='connection_pool'
+                f'Failed to setup connection pool: {e}', parameter='connection_pool'
             ) from e
+        self._redis_client = redis.Redis(connection_pool=self._connection_pool)
+
+    @contextmanager
+    def _wrap_errors(self, action: str) -> Iterator[None]:
+        """Re-raise redis-py errors as ConnectionError naming the operation."""
+        try:
+            yield
+        except redis.RedisError as e:
+            raise ConnectionError(
+                f'Failed to {action}: {e}', host=self._host, port=self._port
+            ) from e
+
+    # Serialization
 
     def serialize(self, data: Any) -> bytes:
         """
         Serialize data using msgpack.
 
-        :param data: Data to serialize
-        :returns: Serialized bytes
-        :raises SerializationError: If serialization fails
+        :raises SerializationError: If the value cannot be packed
         """
         try:
-            return cast(bytes, msgpack.packb(data, use_bin_type=True))
-        except Exception as e:
-            raise SerializationError(f"Failed to serialize data: {e}", serializer='msgpack') from e
+            packed: bytes = msgpack.packb(data, use_bin_type=True)
+        except (TypeError, ValueError, OverflowError) as e:
+            raise SerializationError(
+                f'Failed to serialize data: {e}', serializer='msgpack'
+            ) from e
+        return packed
 
     def deserialize(self, data: bytes) -> Any:
         """
-        Deserialize data using msgpack.
+        Deserialize msgpack bytes.
 
-        :param data: Data to deserialize
-        :returns: Deserialized data
-        :raises SerializationError: If deserialization fails
+        :raises SerializationError: If the bytes are not valid msgpack
         """
         try:
             return msgpack.unpackb(data, raw=False)
-        except Exception as e:
-            raise SerializationError(f"Failed to deserialize data: {e}", serializer='msgpack') from e
+        except (ValueError, TypeError, msgpack.UnpackException) as e:
+            raise SerializationError(
+                f'Failed to deserialize data: {e}', serializer='msgpack'
+            ) from e
+
+    def _encode_field(self, value: Any) -> str:
+        return base64.b64encode(self.serialize(value)).decode('ascii')
+
+    def _decode_field(self, raw: bytes | str) -> Any:
+        try:
+            packed = base64.b64decode(raw, validate=True)
+        except (binascii.Error, ValueError) as e:
+            raise SerializationError(
+                f'Hash value is not base64: {e}', serializer='msgpack'
+            ) from e
+        return self.deserialize(packed)
+
+    # Plain keys
 
     def ping(self) -> bool:
-        """
-        Test connection to Redis/Dragonfly.
-
-        :returns: True if connection is healthy
-        """
+        """Return True if the server answers PING."""
         try:
-            result = self._redis_client.ping()
-            return bool(result)
-        except Exception as e:
-            logger.warning(f"Ping failed: {e}")
+            return bool(self._redis_client.ping())
+        except redis.RedisError as e:
+            logger.warning('Ping failed: %s', e)
             return False
 
-    def set_key(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+    def set_key(self, key: str, value: Any, ttl: int | None = None) -> None:
         """
-        Set a key with optional TTL.
+        Store a value, with a TTL in seconds if ttl is positive.
 
-        :param key: Redis key
-        :param value: Value to store
-        :param ttl: Time to live in seconds (optional)
-        :raises ConnectionError: If Redis operation fails
+        :raises SerializationError: If the value cannot be packed
+        :raises ConnectionError: If the Redis command fails
         """
-        try:
-            serialized_data = self.serialize(value)
-            if ttl and ttl > 0:
-                self._redis_client.setex(key, ttl, serialized_data)
-            else:
-                self._redis_client.set(key, serialized_data)
-        except Exception as e:
-            raise ConnectionError(
-                f"Failed to set key '{key}': {e}",
-                host=cast(str, self._config['host']),
-                port=cast(int, self._config['port'])
-            ) from e
+        payload = self.serialize(value)
+        with self._wrap_errors(f"set key '{key}'"):
+            self._redis_client.set(key, payload, ex=ttl if ttl and ttl > 0 else None)
 
     def get_key(self, key: str) -> Any | None:
         """
-        Get a key value.
+        Return the stored value, or None if the key does not exist.
 
-        :param key: Redis key
-        :returns: Deserialized value or None if key doesn't exist
-        :raises ConnectionError: If Redis operation fails
+        :raises SerializationError: If the stored bytes are not msgpack
+        :raises ConnectionError: If the Redis command fails
         """
-        try:
+        with self._wrap_errors(f"get key '{key}'"):
             data = self._redis_client.get(key)
-            if data is None:
-                return None
-            return self.deserialize(cast(bytes, data))
-        except Exception as e:
-            raise ConnectionError(
-                f"Failed to get key '{key}': {e}",
-                host=cast(str, self._config['host']),
-                port=cast(int, self._config['port'])
-            ) from e
+        if data is None:
+            return None
+        if not isinstance(data, bytes):
+            raise SerializationError(
+                f"Key '{key}' was read as text. Create the redis.Redis client "
+                'with decode_responses=False.',
+                serializer='msgpack',
+            )
+        return self.deserialize(data)
+
+    def key_exists(self, key: str) -> bool:
+        """:raises ConnectionError: If the Redis command fails"""
+        with self._wrap_errors(f"check key existence '{key}'"):
+            return bool(self._redis_client.exists(key))
+
+    def expire_key(self, key: str, ttl: int) -> None:
+        """:raises ConnectionError: If the Redis command fails"""
+        with self._wrap_errors(f"set TTL on key '{key}'"):
+            self._redis_client.expire(key, ttl)
+
+    def expire_keys(self, keys: Iterable[str], ttl: int) -> None:
+        """
+        Set the same TTL on several keys in one round trip.
+
+        :raises ConnectionError: If the Redis command fails
+        """
+        keys = list(keys)
+        with self._wrap_errors(f'set TTL on keys {keys}'):
+            pipe = self._redis_client.pipeline(transaction=False)
+            for key in keys:
+                pipe.expire(key, ttl)
+            pipe.execute()
+
+    def delete_keys(self, *keys: str) -> int:
+        """
+        Delete keys and return how many existed.
+
+        :raises ConnectionError: If the Redis command fails
+        """
+        if not keys:
+            return 0
+        with self._wrap_errors(f'delete keys {list(keys)}'):
+            return int(self._redis_client.delete(*keys))
+
+    def scan_keys(self, match: str) -> list[str]:
+        """
+        Return all keys matching a glob pattern, using SCAN.
+
+        :raises ConnectionError: If the Redis command fails
+        """
+        with self._wrap_errors(f"scan keys '{match}'"):
+            return [
+                key.decode() if isinstance(key, bytes) else key
+                for key in self._redis_client.scan_iter(match=match)
+            ]
+
+    # Hashes
 
     def hash_set(self, key: str, field: str, value: Any) -> None:
         """
-        Set a hash field.
+        Store one hash field.
 
-        :param key: Hash key
-        :param field: Field name
-        :param value: Value to store
-        :raises ConnectionError: If Redis operation fails
+        :raises SerializationError: If the value cannot be packed
+        :raises ConnectionError: If the Redis command fails
         """
-        try:
-            serialized_data = self.serialize(value)
-            # Convert bytes to base64 string for hset compatibility
-            serialized_str = base64.b64encode(serialized_data).decode('utf-8')
-            self._redis_client.hset(key, field, serialized_str)
-        except Exception as e:
-            raise ConnectionError(
-                f"Failed to set hash field '{key}:{field}': {e}",
-                host=cast(str, self._config['host']),
-                port=cast(int, self._config['port'])
-            ) from e
+        encoded = self._encode_field(value)
+        with self._wrap_errors(f"set hash field '{key}:{field}'"):
+            self._redis_client.hset(key, field, encoded)
+
+    def hash_set_many(self, key: str, values: Mapping[str, Any]) -> None:
+        """
+        Store several hash fields with one HSET.
+
+        :raises SerializationError: If a value cannot be packed
+        :raises ConnectionError: If the Redis command fails
+        """
+        if not values:
+            return
+        encoded: dict[FieldT, EncodableT] = {
+            field: self._encode_field(value) for field, value in values.items()
+        }
+        with self._wrap_errors(f"set hash fields in '{key}'"):
+            self._redis_client.hset(key, mapping=encoded)
 
     def hash_get(self, key: str, field: str) -> Any | None:
         """
-        Get a hash field value.
+        Return one hash field, or None if it does not exist.
 
-        :param key: Hash key
-        :param field: Field name
-        :returns: Deserialized value or None if field doesn't exist
-        :raises ConnectionError: If Redis operation fails
+        :raises SerializationError: If the stored value is corrupt
+        :raises ConnectionError: If the Redis command fails
         """
-        try:
-            raw_data = self._redis_client.hget(key, field)
-            if raw_data is None:
-                return None
-
-            # Convert to bytes for deserialization
-            data_bytes: bytes
-            if isinstance(raw_data, str):
-                # Data is base64 encoded string
-                data_bytes = base64.b64decode(raw_data.encode('utf-8'))
-            elif isinstance(raw_data, bytes):
-                # Try to decode as base64 first, if that fails assume it's raw bytes
-                try:
-                    data_bytes = base64.b64decode(raw_data)
-                except Exception:
-                    data_bytes = raw_data  # Use raw bytes as is
-            else:
-                # Fallback for other types
-                data_bytes = cast(bytes, raw_data)
-
-            return self.deserialize(data_bytes)
-        except Exception as e:
-            raise ConnectionError(
-                f"Failed to get hash field '{key}:{field}': {e}",
-                host=cast(str, self._config['host']),
-                port=cast(int, self._config['port'])
-            ) from e
+        with self._wrap_errors(f"get hash field '{key}:{field}'"):
+            raw = self._redis_client.hget(key, field)
+        return None if raw is None else self._decode_field(raw)
 
     def hash_scan(self, key: str) -> list[tuple[str, Any]]:
         """
-        Scan all hash fields efficiently.
+        Return all (field, value) pairs of a hash, using HSCAN.
 
-        :param key: Hash key
-        :returns: List of (field, value) tuples
-        :raises ConnectionError: If Redis operation fails
+        Corrupt values are logged and skipped.
+
+        :raises ConnectionError: If the Redis command fails
         """
-        try:
-            cursor = 0
-            results = []
-            while True:
-                cursor, fields = cast(tuple[int, dict[bytes, bytes]], self._redis_client.hscan(key, cursor))
-                for field, value in fields.items():
-                    try:
-                        deserialized_value = self.deserialize(value)
-                        field_str = field.decode() if isinstance(field, bytes) else str(field)
-                        results.append((field_str, deserialized_value))
-                    except Exception:
-                        continue  # Skip corrupted data
-                if cursor == 0:
-                    break
-            return results
-        except Exception as e:
-            raise ConnectionError(
-                f"Failed to scan hash '{key}': {e}",
-                host=cast(str, self._config['host']),
-                port=cast(int, self._config['port'])
-            ) from e
+        results: list[tuple[str, Any]] = []
+        with self._wrap_errors(f"scan hash '{key}'"):
+            items = list(self._redis_client.hscan_iter(key))
+        for raw_field, raw_value in items:
+            field = raw_field.decode() if isinstance(raw_field, bytes) else raw_field
+            try:
+                results.append((field, self._decode_field(raw_value)))
+            except SerializationError as e:
+                logger.warning("Skipping corrupt field '%s:%s': %s", key, field, e)
+        return results
 
     def hash_len(self, key: str) -> int:
-        """
-        Get hash length.
+        """:raises ConnectionError: If the Redis command fails"""
+        with self._wrap_errors(f"get hash length '{key}'"):
+            return int(self._redis_client.hlen(key))
 
-        :param key: Hash key
-        :returns: Number of fields in hash
-        :raises ConnectionError: If Redis operation fails
-        """
-        try:
-            result = self._redis_client.hlen(key)
-            return cast(int, result)
-        except Exception as e:
-            raise ConnectionError(
-                f"Failed to get hash length '{key}': {e}",
-                host=cast(str, self._config['host']),
-                port=cast(int, self._config['port'])
-            ) from e
-
-    def key_exists(self, key: str) -> bool:
-        """
-        Check if key exists.
-
-        :param key: Redis key
-        :returns: True if key exists
-        :raises ConnectionError: If Redis operation fails
-        """
-        try:
-            result = self._redis_client.exists(key)
-            return bool(result)
-        except Exception as e:
-            raise ConnectionError(
-                f"Failed to check key existence '{key}': {e}",
-                host=cast(str, self._config['host']),
-                port=cast(int, self._config['port'])
-            ) from e
-
-    def expire_key(self, key: str, ttl: int) -> None:
-        """
-        Set TTL on a key.
-
-        :param key: Redis key
-        :param ttl: Time to live in seconds
-        :raises ConnectionError: If Redis operation fails
-        """
-        try:
-            self._redis_client.expire(key, ttl)
-        except Exception as e:
-            raise ConnectionError(
-                f"Failed to set TTL on key '{key}': {e}",
-                host=cast(str, self._config['host']),
-                port=cast(int, self._config['port'])
-            ) from e
+    # Diagnostics
 
     def get_info(self) -> dict[str, Any]:
-        """
-        Get Redis/Dragonfly server information.
-
-        :returns: Server information dictionary
-        """
+        """Return selected INFO fields, or {'error': ...} if INFO fails."""
         try:
-            info = cast(dict[str, Any], self._redis_client.info())
-            return {
-                'redis_version': info.get('redis_version', 'unknown'),
-                'connected_clients': info.get('connected_clients', 0),
-                'used_memory': info.get('used_memory', 0),
-                'used_memory_human': info.get('used_memory_human', 'unknown'),
-                'keyspace_hits': info.get('keyspace_hits', 0),
-                'keyspace_misses': info.get('keyspace_misses', 0),
-                'is_dragonfly': self._is_dragonfly,
-                'serializer': 'msgpack',
-            }
-        except Exception as e:
+            info = self._redis_client.info()
+        except redis.RedisError as e:
             return {'error': str(e), 'serializer': 'msgpack'}
-
-    def get_client_info(self) -> dict[str, Any]:
-        """
-        Get client configuration information.
-
-        :returns: Client configuration dictionary
-        """
         return {
-            'host': self._config['host'],
-            'port': self._config['port'],
-            'db': self._config['db'],
-            'max_connections': self._config['max_connections'],
+            'redis_version': info.get('redis_version', 'unknown'),
+            'connected_clients': info.get('connected_clients', 0),
+            'used_memory': info.get('used_memory', 0),
+            'used_memory_human': info.get('used_memory_human', 'unknown'),
+            'keyspace_hits': info.get('keyspace_hits', 0),
+            'keyspace_misses': info.get('keyspace_misses', 0),
             'is_dragonfly': self._is_dragonfly,
             'serializer': 'msgpack',
-            'keepalive': self._config['socket_keepalive'],
+        }
+
+    def get_client_info(self) -> dict[str, Any]:
+        """Return the client configuration."""
+        return {
+            'host': self._host,
+            'port': self._port,
+            'db': self._db,
+            'max_connections': self._max_connections,
+            'is_dragonfly': self._is_dragonfly,
+            'serializer': 'msgpack',
+            'keepalive': self._socket_keepalive,
         }
 
     def close(self) -> None:
-        """Close connection pool."""
+        """Disconnect the pool this client created. A passed-in client is left open."""
+        if self._connection_pool is None:
+            return
         try:
-            if self._connection_pool:
-                self._connection_pool.disconnect()
-                logger.debug("Connection pool closed")
-        except Exception as e:
-            logger.warning(f"Failed to close connection pool: {e}")
+            self._connection_pool.disconnect()
+        except (redis.RedisError, OSError) as e:
+            logger.warning('Failed to close connection pool: %s', e)
+        else:
+            logger.debug('Connection pool closed')
 
     def __enter__(self) -> 'RedisClient':
-        """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any) -> None:
-        """Context manager exit."""
+    def __exit__(self, *exc_info: object) -> None:
         self.close()

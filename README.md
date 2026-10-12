@@ -1,299 +1,127 @@
-# redisthon 🚀
+# redisthon
 
-> High-performance Redis/Dragonfly session storage for Telethon
+[![CI](https://github.com/AI-Stratov/redisthon/actions/workflows/ci.yml/badge.svg)](https://github.com/AI-Stratov/redisthon/actions/workflows/ci.yml)
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Redis](https://img.shields.io/badge/Redis-5.0+-red.svg)](https://redis.io/)
-[![Dragonfly](https://img.shields.io/badge/Dragonfly-1.0+-orange.svg)](https://dragonflydb.io/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![PyPI version](https://badge.fury.io/py/redisthon.svg)](https://badge.fury.io/py/redisthon)
+Telethon session storage in Redis or Dragonfly, for Telegram bots and userbots
+that run in containers or move between hosts, where a local `.session` file is
+inconvenient.
 
-**redisthon** is a modern, high-performance library for storing Telethon sessions in Redis or Dragonfly. Built from the ground up with cutting-edge technologies for maximum speed, reliability, and type safety.
+## Install
 
-## ✨ Features
-
-- 🔥 **Maximum Performance** - Connection pooling, hiredis, msgpack serialization
-- 🐉 **Dragonfly Support** - Modern Redis replacement with superior performance
-- 🛡️ **Type Safety** - Full type annotations with modern Python 3.11+
-- 🔄 **Connection Pooling** - Automatic connection management and reuse
-- 💾 **Memory Optimization** - `__slots__`, efficient serialization with msgpack
-- 🧹 **Resource Management** - Context manager support with automatic cleanup
-- 📊 **Monitoring** - Built-in health checks and session statistics
-- ⚡ **Batch Operations** - Optimized bulk operations for better throughput
-- 🔒 **Production Ready** - Comprehensive error handling and logging
-
-## 🚀 Quick Start
-
-### Installation
+Install from GitHub until the first PyPI release:
 
 ```bash
-# Install with pip
-pip install redisthon
-
-# Install with development dependencies
-pip install redisthon[dev]
-
-# Install with benchmark tools
-pip install redisthon[benchmark]
+pip install git+https://github.com/AI-Stratov/redisthon
 ```
 
-### Basic Usage
+## Usage
 
 ```python
+import asyncio
+
 from telethon import TelegramClient
+
 from redisthon import RedisSession
 
-# Create a high-performance session
-session = RedisSession(
-    session_name='my_session',
-    host='localhost',
-    port=6379,
-    max_connections=50,  # Connection pooling
-    socket_keepalive=True
-)
+API_ID = 12345  # from https://my.telegram.org
+API_HASH = '0123456789abcdef0123456789abcdef'
 
-# Use with Telethon
-client = TelegramClient(session, api_id, api_hash)
 
-async with client:
-    me = await client.get_me()
-    print(f"Logged in as {me.username}")
-    
-# Session automatically saves to Redis!
+async def main() -> None:
+    session = RedisSession('my_account', host='localhost', port=6379)
+    async with TelegramClient(session, API_ID, API_HASH) as client:
+        me = await client.get_me()
+        print(me.username)
+
+
+asyncio.run(main())
 ```
 
-### Using with Dragonfly
+The first run asks for a phone number and login code. Later runs, on this or any
+other host that can reach the same Redis, reuse the stored session.
 
-```python
-# Dragonfly - modern Redis replacement
-session = RedisSession(
-    session_name='dragonfly_session',
-    host='localhost', 
-    port=6380,
-    is_dragonfly=True,  # Enable Dragonfly optimizations
-    max_connections=100
-)
+Other `RedisSession` options: `db`, `username`, `password`, `key_prefix`
+(default `redisthon:session`), `ttl_seconds` (default 30 days, `0` disables
+expiry), `save_entities` (default `True`), `is_dragonfly`, and pool settings
+(`max_connections`, `connection_timeout`, `socket_keepalive`).
+To share one connection pool between sessions, create a `RedisClient` and pass
+it as `redis_client=`. Sessions do not close a client they were given.
 
-client = TelegramClient(session, api_id, api_hash)
-```
+## Features
 
-### Context Manager (Recommended)
+- Auth key, data center and takeout ID are stored on every `save()` and loaded
+  when the session is created.
+- Entity cache: users and chats Telethon sees are stored, and
+  `get_input_entity()` resolves them by ID, username, phone or name.
+- Update states (pts, qts, seq, date) are stored per entity.
+- Sent-file cache for photos and documents.
+- Every key gets `ttl_seconds`. Each `save()` refreshes the TTL of all four
+  keys, so an active session keeps its caches.
+- `delete()`, which `client.log_out()` calls, removes all keys of the session.
+- `list_sessions()` returns the names of all sessions under the key prefix.
+- `clone()` returns an empty in-memory session, like `SQLiteSession.clone()`.
+  Telethon uses it for CDN connections, which therefore never touch Redis.
+- Dragonfly: `is_dragonfly=True` only skips `SELECT db`. The integration tests
+  run against both Redis and Dragonfly.
+- `get_health_info()` (ping, server info, key names) and `get_statistics()`
+  (cached entity, update state and file counts).
+- Type hints ship with the package (`py.typed`) and pass `mypy --strict`.
 
-```python
-# Automatic resource cleanup
-with RedisSession('my_session') as session:
-    client = TelegramClient(session, api_id, api_hash)
-    # Your code here
-# Connection pool automatically closed
-```
-
-## 🔧 Configuration
-
-### Basic Configuration
-
-```python
-session = RedisSession(
-    session_name='advanced_session',
-    
-    # Redis/Dragonfly settings
-    host='localhost',
-    port=6379,
-    db=0,  # Ignored for Dragonfly
-    password='your_password',
-    username='your_username',  # Redis 6.0+
-    
-    # Performance settings
-    max_connections=50,
-    socket_keepalive=True,
-    socket_keepalive_options={
-        'TCP_KEEPIDLE': 600,
-        'TCP_KEEPINTVL': 60,
-        'TCP_KEEPCNT': 3
-    },
-    health_check_interval=30,
-    connection_timeout=5,
-    socket_timeout=5,
-    
-    # Session settings
-    key_prefix='redisthon:session',
-    ttl_seconds=86400 * 30,  # 30 days
-    save_entities=True,
-    
-    # Special settings
-    is_dragonfly=False
-)
-```
-
-### Custom Redis Client
-
-```python
-import redis
-from redisthon import RedisSession, RedisClient
-
-# Create optimized Redis client
-redis_client = RedisClient(
-    host='localhost',
-    port=6379,
-    max_connections=100,
-    socket_keepalive=True
-)
-
-session = RedisSession(
-    'my_session',
-    redis_client=redis_client
-)
-```
-
-## 📊 Monitoring and Statistics
-
-### Health Checks
-
-```python
-# Check Redis connection health
-if session.ping():
-    print("Redis connection is healthy")
-
-# Get detailed server information
-info = session.get_info()
-print(f"Redis version: {info['redis_version']}")
-print(f"Connected clients: {info['connected_clients']}")
-print(f"Memory usage: {info['used_memory_human']}")
-```
-
-### Session Statistics
-
-```python
-# Get session statistics
-stats = session.get_statistics()
-print(f"Session exists: {stats['session_exists']}")
-print(f"Entities cached: {stats['entities_count']}")
-print(f"Files cached: {stats['sent_files_count']}")
-print(f"Has auth key: {stats['has_auth_key']}")
-
-# Get health information
-health = session.get_health_info()
-print(f"Connection healthy: {health['connection_healthy']}")
-print(f"Server info: {health['server_info']}")
-```
-
-## 🏗️ Architecture
-
-redisthon uses several key technologies for maximum performance:
-
-- **msgpack** - Fast binary serialization format
-- **hiredis** - High-performance Redis client
-- **Connection Pooling** - Connection reuse and management
-- **Base64 Encoding** - Safe storage of binary data in Redis hashes
-- **Type Safety** - Full mypy compatibility
-- **Async Support** - Native async/await support
-
-### Data Storage
-
-Sessions are stored in Redis using the following key structure:
+Keys for a session named `name` with the default prefix:
 
 ```
-redisthon:session:{session_name}:data        # Main session data
-redisthon:session:{session_name}:entities    # Cached entities
-redisthon:session:{session_name}:update_states  # Update states
-redisthon:session:{session_name}:sent_files     # File cache
+redisthon:session:name:data           msgpack: auth key, DC, takeout ID
+redisthon:session:name:entities       hash: entity ID -> base64(msgpack)
+redisthon:session:name:update_states  hash: entity ID -> base64(msgpack)
+redisthon:session:name:sent_files     hash: <md5 hex>_<size>_<photo|document> -> base64(msgpack)
 ```
 
-## 🧪 Testing
+## Limitations
+
+- The Redis client is synchronous, because Telethon's session interface is.
+  Every session call blocks the event loop for one Redis round trip.
+- With the default TTL, a session that nobody starts for 30 days expires and the
+  account has to log in again. Set `ttl_seconds=0` to keep it.
+- Lookups by username, phone or name scan the whole entity hash.
+- Redis errors while reading or writing entities, update states and sent files
+  are logged and treated as a cache miss. Errors in `save()` and in loading the
+  session raise `SessionError`.
+- Do not run two clients on one session at the same time. Telegram rejects the
+  duplicated auth key.
+- There is no `ssl` option.
+
+## Compatibility
+
+Tested in CI:
+
+| Component | Versions                                     |
+|-----------|----------------------------------------------|
+| Python    | 3.11, 3.12, 3.13, 3.14                       |
+| Telethon  | 1.34.0 (lowest allowed), 1.45.0 (locked)     |
+| redis-py  | 5.0.0 (lowest allowed), 8.1.0 (locked)       |
+| Redis     | 6.2, 7.4, 8.10                               |
+| Dragonfly | 2.0                                          |
+
+## Development
+
+Uses [uv](https://docs.astral.sh/uv/).
 
 ```bash
-# Install development dependencies
-pip install redisthon[dev]
-
-# Run tests
-pytest
-
-# Run tests with coverage
-pytest --cov=redisthon
-
-# Run benchmark tests
-pip install redisthon[benchmark]
-pytest --benchmark-only
+uv sync
+uv run ruff check . && uv run ruff format --check .
+uv run mypy redisthon
+uv run pytest --cov=redisthon    # unit tests, no server needed, 100% coverage required
 ```
 
-## 📈 Performance
-
-redisthon shows significantly better performance compared to standard sessions:
-
-- **Efficient Serialization** - msgpack is faster than pickle
-- **Connection Pooling** - Reduced connection overhead
-- **Base64 Encoding** - Safe binary data storage in Redis
-- **Memory Optimization** - `__slots__` reduces memory footprint
-- **Dragonfly Support** - Up to 10x better performance with Dragonfly
-
-### Benchmarks
-
-```python
-# Example benchmark results (your mileage may vary)
-# Session save: 0.5ms vs 2.0ms (standard)
-# Entity lookup: 0.1ms vs 0.5ms (standard)  
-# Memory usage: 50% reduction vs standard sessions
-```
-
-## 🔒 Security
-
-- **Connection Security** - SSL/TLS support through Redis client
-- **Authentication** - Username/password and Redis AUTH support  
-- **Data Encryption** - Optional encryption of sensitive data
-- **Access Control** - Redis ACL compatibility
-
-## 🛠️ Development
+Integration tests need Redis on `REDIS_HOST:REDIS_PORT` (default
+`localhost:6379`). Dragonfly tests run when `DRAGONFLY_PORT` is set.
 
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/redisthon.git
-cd redisthon
-
-# Install with development dependencies
-pip install -e .[dev]
-
-# Run type checking
-mypy redisthon/
-
-# Run linting
-ruff check redisthon/
-
-# Format code
-ruff format redisthon/
-
-# Run all tests
-pytest
+docker run -d -p 6379:6379 redis:8.10
+docker run -d -p 6380:6379 --ulimit memlock=-1 docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.2
+DRAGONFLY_PORT=6380 uv run pytest tests/integration
 ```
 
-### Contributing
+## License
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📝 Requirements
-
-- Python 3.11+
-- Redis 5.0+ or Dragonfly 1.0+
-- Telethon 1.34.0+
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🤝 Acknowledgments
-
-- [Telethon](https://github.com/LonamiWebs/Telethon) - The Telegram client library
-- [Redis](https://redis.io/) - The in-memory data structure store
-- [Dragonfly](https://dragonflydb.io/) - The modern Redis replacement
-
-## 📞 Support
-
-- Create an [issue](https://github.com/yourusername/redisthon/issues) for bug reports
-- Start a [discussion](https://github.com/yourusername/redisthon/discussions) for questions
-- Check the [documentation](https://redisthon.readthedocs.io/) for detailed guides
-
----
-
-Made with ❤️ for the Python and Telegram communities
+MIT, see [LICENSE](LICENSE).
