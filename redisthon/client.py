@@ -4,13 +4,13 @@ Redis/Dragonfly client with connection management.
 
 import base64
 import logging
-from typing import Any, Dict, Optional, cast
+from typing import Any, cast
 
 import msgpack
 import redis
 from redis.connection import ConnectionPool
 
-from .exceptions import ConnectionError, SerializationError, ConfigurationError
+from .exceptions import ConfigurationError, ConnectionError, SerializationError
 
 logger = logging.getLogger(__name__)
 
@@ -35,28 +35,28 @@ class RedisClient:
     """
 
     __slots__ = (
-        '_redis_client',
-        '_connection_pool',
         '_config',
+        '_connection_pool',
         '_is_dragonfly',
+        '_redis_client',
     )
 
     def __init__(
-            self,
-            *,
-            host: str = 'localhost',
-            port: int = 6379,
-            db: int = 0,
-            password: Optional[str] = None,
-            username: Optional[str] = None,
-            max_connections: int = 50,
-            socket_keepalive: bool = True,
-            socket_keepalive_options: Optional[Dict[str, Any]] = None,
-            health_check_interval: int = 30,
-            connection_timeout: int = 5,
-            socket_timeout: int = 5,
-            is_dragonfly: bool = False,
-            redis_client: Optional[redis.Redis] = None,
+        self,
+        *,
+        host: str = 'localhost',
+        port: int = 6379,
+        db: int = 0,
+        password: str | None = None,
+        username: str | None = None,
+        max_connections: int = 50,
+        socket_keepalive: bool = True,
+        socket_keepalive_options: dict[str, Any] | None = None,
+        health_check_interval: int = 30,
+        connection_timeout: int = 5,
+        socket_timeout: int = 5,
+        is_dragonfly: bool = False,
+        redis_client: redis.Redis | None = None,
     ) -> None:
         self._is_dragonfly = is_dragonfly
 
@@ -77,7 +77,7 @@ class RedisClient:
 
         if redis_client is not None:
             self._redis_client = redis_client
-            self._connection_pool: Optional[ConnectionPool] = None
+            self._connection_pool: ConnectionPool | None = None
         else:
             self._setup_connection_pool()
 
@@ -107,12 +107,13 @@ class RedisClient:
             self._connection_pool = ConnectionPool(**pool_kwargs)
             self._redis_client = redis.Redis(connection_pool=self._connection_pool)
 
-            logger.debug(f"Created connection pool for {'Dragonfly' if self._is_dragonfly else 'Redis'}")
+            logger.debug(
+                f'Created connection pool for {"Dragonfly" if self._is_dragonfly else "Redis"}'
+            )
 
         except Exception as e:
             raise ConfigurationError(
-                f"Failed to setup connection pool: {e}",
-                parameter='connection_pool'
+                f'Failed to setup connection pool: {e}', parameter='connection_pool'
             ) from e
 
     def serialize(self, data: Any) -> bytes:
@@ -126,7 +127,9 @@ class RedisClient:
         try:
             return cast(bytes, msgpack.packb(data, use_bin_type=True))
         except Exception as e:
-            raise SerializationError(f"Failed to serialize data: {e}", serializer='msgpack') from e
+            raise SerializationError(
+                f'Failed to serialize data: {e}', serializer='msgpack'
+            ) from e
 
     def deserialize(self, data: bytes) -> Any:
         """
@@ -139,7 +142,9 @@ class RedisClient:
         try:
             return msgpack.unpackb(data, raw=False)
         except Exception as e:
-            raise SerializationError(f"Failed to deserialize data: {e}", serializer='msgpack') from e
+            raise SerializationError(
+                f'Failed to deserialize data: {e}', serializer='msgpack'
+            ) from e
 
     def ping(self) -> bool:
         """
@@ -151,10 +156,10 @@ class RedisClient:
             result = self._redis_client.ping()
             return bool(result)
         except Exception as e:
-            logger.warning(f"Ping failed: {e}")
+            logger.warning(f'Ping failed: {e}')
             return False
 
-    def set_key(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+    def set_key(self, key: str, value: Any, ttl: int | None = None) -> None:
         """
         Set a key with optional TTL.
 
@@ -173,7 +178,7 @@ class RedisClient:
             raise ConnectionError(
                 f"Failed to set key '{key}': {e}",
                 host=cast(str, self._config['host']),
-                port=cast(int, self._config['port'])
+                port=cast(int, self._config['port']),
             ) from e
 
     def get_key(self, key: str) -> Any | None:
@@ -193,7 +198,7 @@ class RedisClient:
             raise ConnectionError(
                 f"Failed to get key '{key}': {e}",
                 host=cast(str, self._config['host']),
-                port=cast(int, self._config['port'])
+                port=cast(int, self._config['port']),
             ) from e
 
     def hash_set(self, key: str, field: str, value: Any) -> None:
@@ -214,7 +219,7 @@ class RedisClient:
             raise ConnectionError(
                 f"Failed to set hash field '{key}:{field}': {e}",
                 host=cast(str, self._config['host']),
-                port=cast(int, self._config['port'])
+                port=cast(int, self._config['port']),
             ) from e
 
     def hash_get(self, key: str, field: str) -> Any | None:
@@ -251,7 +256,7 @@ class RedisClient:
             raise ConnectionError(
                 f"Failed to get hash field '{key}:{field}': {e}",
                 host=cast(str, self._config['host']),
-                port=cast(int, self._config['port'])
+                port=cast(int, self._config['port']),
             ) from e
 
     def hash_scan(self, key: str) -> list[tuple[str, Any]]:
@@ -266,11 +271,16 @@ class RedisClient:
             cursor = 0
             results = []
             while True:
-                cursor, fields = cast(tuple[int, dict[bytes, bytes]], self._redis_client.hscan(key, cursor))
+                cursor, fields = cast(
+                    tuple[int, dict[bytes, bytes]],
+                    self._redis_client.hscan(key, cursor),
+                )
                 for field, value in fields.items():
                     try:
                         deserialized_value = self.deserialize(value)
-                        field_str = field.decode() if isinstance(field, bytes) else str(field)
+                        field_str = (
+                            field.decode() if isinstance(field, bytes) else str(field)
+                        )
                         results.append((field_str, deserialized_value))
                     except Exception:
                         continue  # Skip corrupted data
@@ -281,7 +291,7 @@ class RedisClient:
             raise ConnectionError(
                 f"Failed to scan hash '{key}': {e}",
                 host=cast(str, self._config['host']),
-                port=cast(int, self._config['port'])
+                port=cast(int, self._config['port']),
             ) from e
 
     def hash_len(self, key: str) -> int:
@@ -299,7 +309,7 @@ class RedisClient:
             raise ConnectionError(
                 f"Failed to get hash length '{key}': {e}",
                 host=cast(str, self._config['host']),
-                port=cast(int, self._config['port'])
+                port=cast(int, self._config['port']),
             ) from e
 
     def key_exists(self, key: str) -> bool:
@@ -317,7 +327,7 @@ class RedisClient:
             raise ConnectionError(
                 f"Failed to check key existence '{key}': {e}",
                 host=cast(str, self._config['host']),
-                port=cast(int, self._config['port'])
+                port=cast(int, self._config['port']),
             ) from e
 
     def expire_key(self, key: str, ttl: int) -> None:
@@ -334,7 +344,7 @@ class RedisClient:
             raise ConnectionError(
                 f"Failed to set TTL on key '{key}': {e}",
                 host=cast(str, self._config['host']),
-                port=cast(int, self._config['port'])
+                port=cast(int, self._config['port']),
             ) from e
 
     def get_info(self) -> dict[str, Any]:
@@ -379,14 +389,19 @@ class RedisClient:
         try:
             if self._connection_pool:
                 self._connection_pool.disconnect()
-                logger.debug("Connection pool closed")
+                logger.debug('Connection pool closed')
         except Exception as e:
-            logger.warning(f"Failed to close connection pool: {e}")
+            logger.warning(f'Failed to close connection pool: {e}')
 
     def __enter__(self) -> 'RedisClient':
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
         """Context manager exit."""
         self.close()

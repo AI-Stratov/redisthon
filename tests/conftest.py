@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from redisthon import RedisSession, RedisClient
+from redisthon import RedisClient, RedisSession
 
 
 @pytest.fixture

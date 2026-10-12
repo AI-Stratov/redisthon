@@ -27,10 +27,7 @@ class ConnectionError(RedisthonError):
     """
 
     def __init__(
-            self,
-            message: str,
-            host: str | None = None,
-            port: int | None = None
+        self, message: str, host: str | None = None, port: int | None = None
     ) -> None:
         details = {}
         if host:

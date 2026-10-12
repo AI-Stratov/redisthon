@@ -27,8 +27,8 @@ class TestSerializationPerformance:
             'metadata': {
                 'version': '0.1.0',
                 'timestamp': time.time(),
-                'features': ['connection_pooling', 'hash_storage', 'ttl_support']
-            }
+                'features': ['connection_pooling', 'hash_storage', 'ttl_support'],
+            },
         }
 
     def test_msgpack_serialization_speed(self, sample_data):
@@ -47,8 +47,10 @@ class TestSerializationPerformance:
         ops_per_second = iterations / duration
 
         # Performance should be reasonable
-        assert ops_per_second > 1000, f"Serialization too slow: {ops_per_second:.0f} ops/sec"
-        assert duration < 5.0, f"Total time too long: {duration:.3f}s"
+        assert ops_per_second > 1000, (
+            f'Serialization too slow: {ops_per_second:.0f} ops/sec'
+        )
+        assert duration < 5.0, f'Total time too long: {duration:.3f}s'
 
         # Verify data integrity
         assert deserialized == sample_data
@@ -61,8 +63,10 @@ class TestSerializationPerformance:
         serialized = client.serialize(sample_data)
 
         # Serialized data should be reasonably compact
-        assert len(serialized) < 2000, f"Serialized data too large: {len(serialized)} bytes"
-        assert len(serialized) > 0, "Serialized data is empty"
+        assert len(serialized) < 2000, (
+            f'Serialized data too large: {len(serialized)} bytes'
+        )
+        assert len(serialized) > 0, 'Serialized data is empty'
 
 
 class TestRedisOperationsPerformance:
@@ -79,6 +83,7 @@ class TestRedisOperationsPerformance:
                 def wrapper(*args, **kwargs):
                     time.sleep(0.001)  # Simulate small delay
                     return b'test_data' if 'get' in operation_name else None
+
                 return wrapper
 
             mock_redis_instance.set = timed_operation('set')
@@ -109,7 +114,9 @@ class TestRedisOperationsPerformance:
         ops_per_second = (iterations * 2) / duration  # 2 ops per iteration
 
         # Should handle reasonable throughput
-        assert ops_per_second > 100, f"Operations too slow: {ops_per_second:.0f} ops/sec"
+        assert ops_per_second > 100, (
+            f'Operations too slow: {ops_per_second:.0f} ops/sec'
+        )
 
     def test_hash_operations_speed(self, mock_client_with_timing):
         """Test speed of hash operations."""
@@ -128,7 +135,9 @@ class TestRedisOperationsPerformance:
         ops_per_second = (iterations * 2) / duration
 
         # Hash operations should be efficient
-        assert ops_per_second > 100, f"Hash operations too slow: {ops_per_second:.0f} ops/sec"
+        assert ops_per_second > 100, (
+            f'Hash operations too slow: {ops_per_second:.0f} ops/sec'
+        )
 
 
 class TestSessionPerformance:
@@ -140,7 +149,9 @@ class TestSessionPerformance:
         mock_client = Mock(spec=RedisClient)
         mock_client.ping.return_value = True
         mock_client.serialize.side_effect = lambda x: str(x).encode()
-        mock_client.deserialize.side_effect = lambda x: eval(x.decode()) if isinstance(x, bytes) else x
+        mock_client.deserialize.side_effect = (
+            lambda x: eval(x.decode()) if isinstance(x, bytes) else x
+        )
         mock_client.get_key.return_value = None
         mock_client.set_key.return_value = None
         mock_client.hash_get.return_value = None
@@ -163,8 +174,10 @@ class TestSessionPerformance:
         creations_per_second = iterations / duration
 
         # Session creation should be fast
-        assert creations_per_second > 50, f"Session creation too slow: {creations_per_second:.0f}/sec"
-        assert duration < 10.0, f"Total creation time too long: {duration:.3f}s"
+        assert creations_per_second > 50, (
+            f'Session creation too slow: {creations_per_second:.0f}/sec'
+        )
+        assert duration < 10.0, f'Total creation time too long: {duration:.3f}s'
 
     def test_session_save_load_speed(self, fast_mock_client):
         """Test session save/load performance."""
@@ -185,7 +198,9 @@ class TestSessionPerformance:
         operations_per_second = (iterations * 4) / duration  # 4 ops per iteration
 
         # Session operations should be reasonably fast
-        assert operations_per_second > 20, f"Session ops too slow: {operations_per_second:.0f}/sec"
+        assert operations_per_second > 20, (
+            f'Session ops too slow: {operations_per_second:.0f}/sec'
+        )
 
 
 class TestMemoryUsage:
@@ -194,10 +209,14 @@ class TestMemoryUsage:
     def test_session_memory_efficiency(self):
         """Test that sessions use __slots__ for memory efficiency."""
         # Check that RedisSession uses __slots__
-        assert hasattr(RedisSession, '__slots__'), "RedisSession should use __slots__ for memory efficiency"
+        assert hasattr(RedisSession, '__slots__'), (
+            'RedisSession should use __slots__ for memory efficiency'
+        )
 
         # Check RedisClient uses __slots__
-        assert hasattr(RedisClient, '__slots__'), "RedisClient should use __slots__ for memory efficiency"
+        assert hasattr(RedisClient, '__slots__'), (
+            'RedisClient should use __slots__ for memory efficiency'
+        )
 
     def test_multiple_sessions_memory(self, fast_mock_client):
         """Test memory usage with multiple sessions."""
@@ -238,7 +257,7 @@ class TestScalability:
 
         # Should handle mixed workload efficiently
         assert len(operations) == 60  # 3 ops × 20 iterations
-        assert duration < 2.0, f"Mixed workload took too long: {duration:.3f}s"
+        assert duration < 2.0, f'Mixed workload took too long: {duration:.3f}s'
 
     def test_large_entity_cache_performance(self, fast_mock_client):
         """Test performance with large entity cache simulation."""
@@ -256,7 +275,9 @@ class TestScalability:
         lookups_per_second = entity_lookups / duration
 
         # Entity lookups should be fast (O(1) with Redis Hash)
-        assert lookups_per_second > 500, f"Entity lookups too slow: {lookups_per_second:.0f}/sec"
+        assert lookups_per_second > 500, (
+            f'Entity lookups too slow: {lookups_per_second:.0f}/sec'
+        )
 
 
 @pytest.mark.benchmark
@@ -289,7 +310,7 @@ class TestBenchmarkSuite:
         duration = time.perf_counter() - start_time
 
         # End-to-end should complete quickly
-        assert duration < 1.0, f"End-to-end test took too long: {duration:.3f}s"
+        assert duration < 1.0, f'End-to-end test took too long: {duration:.3f}s'
         assert health['connection_healthy'] is True
         assert 'session_name' in stats
 
@@ -324,7 +345,11 @@ class TestBenchmarkSuite:
         }
 
         # Verify metrics are reasonable
-        assert metrics['compression_ratio'] > 0.5, "Compression ratio should be meaningful"
-        assert metrics['serialization_time_ms'] < 100, "Serialization should be fast"
-        assert metrics['deserialization_time_ms'] < 100, "Deserialization should be fast"
-        assert deserialized == test_data, "Data integrity should be maintained"
+        assert metrics['compression_ratio'] > 0.5, (
+            'Compression ratio should be meaningful'
+        )
+        assert metrics['serialization_time_ms'] < 100, 'Serialization should be fast'
+        assert metrics['deserialization_time_ms'] < 100, (
+            'Deserialization should be fast'
+        )
+        assert deserialized == test_data, 'Data integrity should be maintained'

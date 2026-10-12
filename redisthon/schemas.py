@@ -115,10 +115,10 @@ update_state_schema = RedisSchemas.get_update_state_structure()
 sent_file_schema = RedisSchemas.get_sent_file_structure()
 
 __all__ = [
-    'SearchFilter',
     'RedisSchemas',
-    'session_schema',
+    'SearchFilter',
     'entity_schema',
-    'update_state_schema',
     'sent_file_schema',
+    'session_schema',
+    'update_state_schema',
 ]

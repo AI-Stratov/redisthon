@@ -65,12 +65,12 @@ class TestSerialization:
     def test_serialization_error_handling(self):
         """Test serialization error handling."""
         with patch('redisthon.client.msgpack') as mock_msgpack:
-            mock_msgpack.packb.side_effect = Exception("Serialization failed")
+            mock_msgpack.packb.side_effect = Exception('Serialization failed')
 
             with patch('redis.Redis'):
                 client = RedisClient()
 
-            with pytest.raises(SerializationError, match="Failed to serialize data"):
+            with pytest.raises(SerializationError, match='Failed to serialize data'):
                 client.serialize({'test': 'data'})
 
 
@@ -100,7 +100,7 @@ class TestRedisOperations:
     def test_ping_failure(self, mock_redis_client):
         """Test ping failure handling."""
         client, mock_redis = mock_redis_client
-        mock_redis.ping.side_effect = Exception("Connection failed")
+        mock_redis.ping.side_effect = Exception('Connection failed')
 
         result = client.ping()
         assert result is False
@@ -150,7 +150,9 @@ class TestRedisOperations:
         with patch.object(client, 'serialize', return_value=b'serialized_data'):
             client.hash_set('hash_key', 'field1', {'data': 'value'})
 
-        mock_redis.hset.assert_called_once_with('hash_key', 'field1', b'serialized_data')
+        mock_redis.hset.assert_called_once_with(
+            'hash_key', 'field1', b'serialized_data'
+        )
 
         # Test hash get
         mock_redis.hget.return_value = b'serialized_data'
@@ -170,7 +172,9 @@ class TestRedisOperations:
             (0, {b'field3': b'data3'}),  # cursor 0 indicates end
         ]
 
-        with patch.object(client, 'deserialize', side_effect=lambda x: f'deserialized_{x.decode()}'):
+        with patch.object(
+            client, 'deserialize', side_effect=lambda x: f'deserialized_{x.decode()}'
+        ):
             result = client.hash_scan('hash_key')
 
         expected = [
@@ -192,10 +196,18 @@ class TestErrorHandling:
             mock_redis_class.return_value = mock_redis_instance
 
             # Make all operations fail
-            mock_redis_instance.set.side_effect = redis.ConnectionError("Connection failed")
-            mock_redis_instance.get.side_effect = redis.ConnectionError("Connection failed")
-            mock_redis_instance.hset.side_effect = redis.ConnectionError("Connection failed")
-            mock_redis_instance.hget.side_effect = redis.ConnectionError("Connection failed")
+            mock_redis_instance.set.side_effect = redis.ConnectionError(
+                'Connection failed'
+            )
+            mock_redis_instance.get.side_effect = redis.ConnectionError(
+                'Connection failed'
+            )
+            mock_redis_instance.hset.side_effect = redis.ConnectionError(
+                'Connection failed'
+            )
+            mock_redis_instance.hget.side_effect = redis.ConnectionError(
+                'Connection failed'
+            )
 
             client = RedisClient(host='localhost', port=6379)
             client._redis_client = mock_redis_instance
@@ -222,11 +234,11 @@ class TestErrorHandling:
 
         # Test hash set error
         with patch.object(client, 'serialize', return_value=b'data'):
-            with pytest.raises(ConnectionError, match="Failed to set hash field"):
+            with pytest.raises(ConnectionError, match='Failed to set hash field'):
                 client.hash_set('hash_key', 'field1', {'data': 'value'})
 
         # Test hash get error
-        with pytest.raises(ConnectionError, match="Failed to get hash field"):
+        with pytest.raises(ConnectionError, match='Failed to get hash field'):
             client.hash_get('hash_key', 'field1')
 
 
@@ -237,10 +249,7 @@ class TestClientInfo:
         """Test getting client configuration info."""
         with patch('redis.Redis'):
             client = RedisClient(
-                host='test.host',
-                port=6380,
-                max_connections=100,
-                is_dragonfly=True
+                host='test.host', port=6380, max_connections=100, is_dragonfly=True
             )
 
         info = client.get_client_info()
@@ -280,7 +289,7 @@ class TestClientInfo:
         """Test getting server info with error."""
         with patch('redis.Redis') as mock_redis_class:
             mock_redis_instance = Mock()
-            mock_redis_instance.info.side_effect = Exception("Info failed")
+            mock_redis_instance.info.side_effect = Exception('Info failed')
             mock_redis_class.return_value = mock_redis_instance
 
             client = RedisClient()
@@ -316,7 +325,7 @@ class TestContextManager:
             with patch('redis.ConnectionPool', return_value=mock_pool):
                 try:
                     with RedisClient() as client:
-                        raise ValueError("Test exception")
+                        raise ValueError('Test exception')
                 except ValueError:
                     pass
 

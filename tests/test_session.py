@@ -2,7 +2,7 @@
 Tests for RedisSession core functionality.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from telethon.tl.types import InputPhoto
@@ -28,7 +28,9 @@ class TestRedisSessionInitialization:
 
     def test_init_invalid_name_type(self):
         """Test initialization with invalid session name type."""
-        with pytest.raises(SessionError, match="Session name must be a string or bytes"):
+        with pytest.raises(
+            SessionError, match='Session name must be a string or bytes'
+        ):
             RedisSession(123)
 
     def test_key_generation(self, mock_redis_client):
@@ -36,7 +38,9 @@ class TestRedisSessionInitialization:
         session = RedisSession('test_session', redis_client=mock_redis_client)
         assert session._session_key == 'redisthon:session:test_session:data'
         assert session._entities_key == 'redisthon:session:test_session:entities'
-        assert session._update_states_key == 'redisthon:session:test_session:update_states'
+        assert (
+            session._update_states_key == 'redisthon:session:test_session:update_states'
+        )
         assert session._sent_files_key == 'redisthon:session:test_session:sent_files'
 
 
@@ -95,8 +99,7 @@ class TestEntityManagement:
         assert len(result) == 1
         assert result[0] == (123456789, 987654321)
         redis_session._client.hash_get.assert_called_with(
-            redis_session._entities_key,
-            '123456789'
+            redis_session._entities_key, '123456789'
         )
 
     def test_get_entity_by_id_not_found(self, redis_session):
@@ -131,13 +134,7 @@ class TestUpdateStateManagement:
 
     def test_set_update_state(self, redis_session):
         """Test setting update state."""
-        state = State(
-            pts=100,
-            qts=50,
-            date=datetime.now(timezone.utc),
-            seq=25,
-            unread_count=3
-        )
+        state = State(pts=100, qts=50, date=datetime.now(UTC), seq=25, unread_count=3)
 
         redis_session.set_update_state(123456789, state)
 
@@ -207,7 +204,7 @@ class TestFileCaching:
         file_data = {
             'id': 123,
             'access_hash': 456,
-            'file_reference': 'test_ref'.encode().hex(),
+            'file_reference': b'test_ref'.hex(),
             'type': 'photo',
         }
         redis_session._client.hash_get.return_value = file_data
@@ -290,7 +287,7 @@ class TestErrorHandling:
 
     def test_entity_operations_with_client_errors(self, redis_session):
         """Test entity operations when Redis client raises exceptions."""
-        redis_session._client.hash_get.side_effect = Exception("Redis error")
+        redis_session._client.hash_get.side_effect = Exception('Redis error')
 
         # Should not raise, just return empty results
         result = redis_session.get_entity_rows_by_id(123456789)
@@ -298,7 +295,7 @@ class TestErrorHandling:
 
     def test_save_session_handles_errors_gracefully(self, redis_session):
         """Test that save handles Redis errors gracefully."""
-        redis_session._client.set_key.side_effect = Exception("Redis error")
+        redis_session._client.set_key.side_effect = Exception('Redis error')
         redis_session.set_dc(2, 'test.telegram.org', 443)
 
         # Should raise SessionError with proper context

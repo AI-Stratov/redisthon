@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-from redisthon import RedisSession, RedisClient
+from redisthon import RedisClient, RedisSession
 
 
 def get_redis_config():
@@ -70,7 +70,9 @@ class TestRedisIntegration:
     def skip_if_no_redis(self):
         """Skip tests if Redis is not available."""
         if not redis_available():
-            pytest.skip("Redis server not available. Set REDIS_HOST/REDIS_PORT or start local Redis.")
+            pytest.skip(
+                'Redis server not available. Set REDIS_HOST/REDIS_PORT or start local Redis.'
+            )
 
     def test_real_redis_connection(self):
         """Test connection to real Redis server."""
@@ -119,9 +121,7 @@ class TestRedisIntegration:
 
             # Store entity manually
             session._client.hash_set(
-                session._entities_key,
-                str(entity_data['id']),
-                entity_data
+                session._entities_key, str(entity_data['id']), entity_data
             )
 
             # Retrieve entity
@@ -163,7 +163,9 @@ class TestDragonflyIntegration:
     def skip_if_no_dragonfly(self):
         """Skip tests if Dragonfly is not available."""
         if not dragonfly_available():
-            pytest.skip("Dragonfly server not available. Set DRAGONFLY_HOST/DRAGONFLY_PORT or start local Dragonfly.")
+            pytest.skip(
+                'Dragonfly server not available. Set DRAGONFLY_HOST/DRAGONFLY_PORT or start local Dragonfly.'
+            )
 
     def test_dragonfly_connection(self):
         """Test connection to Dragonfly server."""
@@ -195,7 +197,7 @@ class TestDragonflyIntegration:
             duration = time.perf_counter() - start_time
 
             # Should be reasonably fast
-            assert duration < 5.0, f"Operations took too long: {duration:.3f}s"
+            assert duration < 5.0, f'Operations took too long: {duration:.3f}s'
 
 
 @pytest.mark.integration
@@ -204,12 +206,15 @@ class TestEnvironmentConfiguration:
 
     def test_redis_config_from_env(self):
         """Test Redis configuration from environment variables."""
-        with patch.dict(os.environ, {
-            'REDIS_HOST': 'test.host',
-            'REDIS_PORT': '1234',
-            'REDIS_PASSWORD': 'test_password',
-            'REDIS_USERNAME': 'test_user',
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                'REDIS_HOST': 'test.host',
+                'REDIS_PORT': '1234',
+                'REDIS_PASSWORD': 'test_password',
+                'REDIS_USERNAME': 'test_user',
+            },
+        ):
             config = get_redis_config()
 
             assert config['host'] == 'test.host'
@@ -219,11 +224,14 @@ class TestEnvironmentConfiguration:
 
     def test_dragonfly_config_from_env(self):
         """Test Dragonfly configuration from environment variables."""
-        with patch.dict(os.environ, {
-            'DRAGONFLY_HOST': 'dragon.host',
-            'DRAGONFLY_PORT': '5678',
-            'DRAGONFLY_PASSWORD': 'dragon_password',
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                'DRAGONFLY_HOST': 'dragon.host',
+                'DRAGONFLY_PORT': '5678',
+                'DRAGONFLY_PASSWORD': 'dragon_password',
+            },
+        ):
             config = get_dragonfly_config()
 
             assert config['host'] == 'dragon.host'
@@ -258,13 +266,13 @@ if __name__ == '__main__':
         REDIS_HOST=myredis.com REDIS_PORT=6380 python -m pytest tests/test_integration.py
     """
 
-    print("=== Redis Integration Test Setup ===")
-    print(f"Redis config: {get_redis_config()}")
-    print(f"Redis available: {redis_available()}")
+    print('=== Redis Integration Test Setup ===')
+    print(f'Redis config: {get_redis_config()}')
+    print(f'Redis available: {redis_available()}')
 
-    print("\n=== Dragonfly Integration Test Setup ===")
-    print(f"Dragonfly config: {get_dragonfly_config()}")
-    print(f"Dragonfly available: {dragonfly_available()}")
+    print('\n=== Dragonfly Integration Test Setup ===')
+    print(f'Dragonfly config: {get_dragonfly_config()}')
+    print(f'Dragonfly available: {dragonfly_available()}')
 
     # Run specific tests
     pytest.main([__file__, '-v', '--tb=short'])

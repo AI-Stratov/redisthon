@@ -6,8 +6,8 @@ Implements all required Telethon session methods with Redis/Dragonfly backend.
 
 import base64
 import logging
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from telethon.crypto import AuthKey
 from telethon.sessions.memory import MemorySession, _SentFileType
@@ -42,49 +42,47 @@ class RedisSession(MemorySession):  # type: ignore[misc]
     """
 
     __slots__ = (
-        'session_name',
+        '_auth_key',
         '_client',
-        '_key_prefix',
-        '_session_key',
-        '_entities_key',
-        '_update_states_key',
-        '_sent_files_key',
-        '_ttl_seconds',
-        'save_entities',
         # Telethon session attributes
         '_dc_id',
-        '_server_address',
+        '_entities_key',
+        '_key_prefix',
         '_port',
+        '_sent_files_key',
+        '_server_address',
+        '_session_key',
         '_takeout_id',
-        '_auth_key',
+        '_ttl_seconds',
+        '_update_states_key',
+        'save_entities',
+        'session_name',
     )
 
     def __init__(
-            self,
-            session_name: str | bytes,
-            *,
-            # Redis connection settings
-            host: str = 'localhost',
-            port: int = 6379,
-            db: int = 0,
-            password: Optional[str] = None,
-            username: Optional[str] = None,
-            is_dragonfly: bool = False,
-            redis_client: Optional[RedisClient] = None,
-
-            # Connection settings
-            max_connections: int = 50,
-            socket_keepalive: bool = True,
-            socket_keepalive_options: Optional[dict[str, Any]] = None,
-            connection_timeout: int = 5,
-
-            # Session settings
-            key_prefix: str = 'redisthon:session',
-            ttl_seconds: int = 86400 * 30,  # 30 days default
-            save_entities: bool = True,
+        self,
+        session_name: str | bytes,
+        *,
+        # Redis connection settings
+        host: str = 'localhost',
+        port: int = 6379,
+        db: int = 0,
+        password: str | None = None,
+        username: str | None = None,
+        is_dragonfly: bool = False,
+        redis_client: RedisClient | None = None,
+        # Connection settings
+        max_connections: int = 50,
+        socket_keepalive: bool = True,
+        socket_keepalive_options: dict[str, Any] | None = None,
+        connection_timeout: int = 5,
+        # Session settings
+        key_prefix: str = 'redisthon:session',
+        ttl_seconds: int = 86400 * 30,  # 30 days default
+        save_entities: bool = True,
     ) -> None:
         if not isinstance(session_name, (str, bytes)):
-            raise SessionError("Session name must be a string or bytes")
+            raise SessionError('Session name must be a string or bytes')
 
         super().__init__()
 
@@ -136,7 +134,7 @@ class RedisSession(MemorySession):  # type: ignore[misc]
                         auth_key_bytes = base64.standard_b64decode(auth_key_b64)
                         self._auth_key = AuthKey(data=auth_key_bytes)
                     except Exception as e:
-                        logger.warning(f"Failed to decode auth key: {e}")
+                        logger.warning(f'Failed to decode auth key: {e}')
                         self._auth_key = None
 
                 logger.debug(f"Loaded session data for '{self.session_name}'")
@@ -144,15 +142,14 @@ class RedisSession(MemorySession):  # type: ignore[misc]
                 logger.debug(f"No existing session data for '{self.session_name}'")
 
         except Exception as e:
-            logger.error(f"Failed to load session data: {e}")
+            logger.error(f'Failed to load session data: {e}')
             raise SessionError(
-                f"Failed to load session data: {e}",
-                session_name=self.session_name
+                f'Failed to load session data: {e}', session_name=self.session_name
             ) from e
 
     # Core Telethon session methods
 
-    def clone(self, to_instance: Optional[MemorySession] = None) -> 'RedisSession':
+    def clone(self, to_instance: MemorySession | None = None) -> 'RedisSession':
         """
         Clone session to another instance.
 
@@ -198,19 +195,22 @@ class RedisSession(MemorySession):  # type: ignore[misc]
                 'port': self._port,
                 'auth_key': auth_key_b64,
                 'takeout_id': self._takeout_id,
-                'saved_at': datetime.now(timezone.utc).isoformat(),
+                'saved_at': datetime.now(UTC).isoformat(),
                 'version': '0.1.0',
             }
 
             # Save with optional TTL
-            self._client.set_key(self._session_key, session_data, self._ttl_seconds if self._ttl_seconds > 0 else None)
+            self._client.set_key(
+                self._session_key,
+                session_data,
+                self._ttl_seconds if self._ttl_seconds > 0 else None,
+            )
             logger.debug(f"Session '{self.session_name}' saved to Redis")
 
         except Exception as e:
-            logger.error(f"Failed to save session: {e}")
+            logger.error(f'Failed to save session: {e}')
             raise SessionError(
-                f"Failed to save session: {e}",
-                session_name=self.session_name
+                f'Failed to save session: {e}', session_name=self.session_name
             ) from e
 
     def close(self) -> None:
@@ -219,7 +219,7 @@ class RedisSession(MemorySession):  # type: ignore[misc]
             self._client.close()
             logger.debug(f"Session '{self.session_name}' closed")
         except Exception as e:
-            logger.warning(f"Error closing session: {e}")
+            logger.warning(f'Error closing session: {e}')
 
     def delete(self) -> None:
         """Delete all session data from Redis."""
@@ -247,17 +247,17 @@ class RedisSession(MemorySession):  # type: ignore[misc]
     # Properties for compatibility
 
     @property
-    def dc_id(self) -> Optional[int]:
+    def dc_id(self) -> int | None:
         """Get data center ID."""
         return getattr(self, '_dc_id', None)
 
     @property
-    def server_address(self) -> Optional[str]:
+    def server_address(self) -> str | None:
         """Get server address."""
         return getattr(self, '_server_address', None)
 
     @property
-    def port(self) -> Optional[int]:
+    def port(self) -> int | None:
         """Get server port."""
         return getattr(self, '_port', None)
 
@@ -267,7 +267,7 @@ class RedisSession(MemorySession):  # type: ignore[misc]
         return getattr(self, '_auth_key', None)
 
     @property
-    def takeout_id(self) -> Optional[int]:
+    def takeout_id(self) -> int | None:
         """Get takeout ID."""
         return getattr(self, '_takeout_id', None)
 
@@ -294,7 +294,7 @@ class RedisSession(MemorySession):  # type: ignore[misc]
                     'username': username or '',
                     'phone': phone or '',
                     'name': name or '',
-                    'cached_at': datetime.now(timezone.utc).isoformat(),
+                    'cached_at': datetime.now(UTC).isoformat(),
                 }
 
                 self._client.hash_set(self._entities_key, str(entity_id), entity_data)
@@ -303,12 +303,14 @@ class RedisSession(MemorySession):  # type: ignore[misc]
             if self._ttl_seconds > 0:
                 self._client.expire_key(self._entities_key, self._ttl_seconds)
 
-            logger.debug(f"Cached {len(rows)} entities")
+            logger.debug(f'Cached {len(rows)} entities')
 
         except Exception as e:
-            logger.error(f"Failed to process entities: {e}")
+            logger.error(f'Failed to process entities: {e}')
 
-    def get_entity_rows_by_id(self, entity_id: int, exact: bool = True) -> list[tuple[int, int]]:
+    def get_entity_rows_by_id(
+        self, entity_id: int, exact: bool = True
+    ) -> list[tuple[int, int]]:
         """
         Get entity by ID.
 
@@ -322,7 +324,7 @@ class RedisSession(MemorySession):  # type: ignore[misc]
                 return [(entity_data['id'], entity_data['access_hash'])]
             return []
         except Exception as e:
-            logger.debug(f"Entity lookup by ID failed: {e}")
+            logger.debug(f'Entity lookup by ID failed: {e}')
             return []
 
     def get_entity_rows_by_username(self, username: str) -> list[tuple[int, int]]:
@@ -333,12 +335,12 @@ class RedisSession(MemorySession):  # type: ignore[misc]
         :returns: List of (entity_id, access_hash) tuples
         """
         try:
-            for field, entity_data in self._client.hash_scan(self._entities_key):
+            for _field, entity_data in self._client.hash_scan(self._entities_key):
                 if entity_data.get('username') == username:
                     return [(entity_data['id'], entity_data['access_hash'])]
             return []
         except Exception as e:
-            logger.debug(f"Entity lookup by username failed: {e}")
+            logger.debug(f'Entity lookup by username failed: {e}')
             return []
 
     def get_entity_rows_by_phone(self, phone: str) -> list[tuple[int, int]]:
@@ -349,12 +351,12 @@ class RedisSession(MemorySession):  # type: ignore[misc]
         :returns: List of (entity_id, access_hash) tuples
         """
         try:
-            for field, entity_data in self._client.hash_scan(self._entities_key):
+            for _field, entity_data in self._client.hash_scan(self._entities_key):
                 if entity_data.get('phone') == phone:
                     return [(entity_data['id'], entity_data['access_hash'])]
             return []
         except Exception as e:
-            logger.debug(f"Entity lookup by phone failed: {e}")
+            logger.debug(f'Entity lookup by phone failed: {e}')
             return []
 
     def get_entity_rows_by_name(self, name: str) -> list[tuple[int, int]]:
@@ -365,12 +367,12 @@ class RedisSession(MemorySession):  # type: ignore[misc]
         :returns: List of (entity_id, access_hash) tuples
         """
         try:
-            for field, entity_data in self._client.hash_scan(self._entities_key):
+            for _field, entity_data in self._client.hash_scan(self._entities_key):
                 if entity_data.get('name') == name:
                     return [(entity_data['id'], entity_data['access_hash'])]
             return []
         except Exception as e:
-            logger.debug(f"Entity lookup by name failed: {e}")
+            logger.debug(f'Entity lookup by name failed: {e}')
             return []
 
     def get_input_entity(self, key: Any) -> Any:
@@ -384,7 +386,7 @@ class RedisSession(MemorySession):  # type: ignore[misc]
 
     # Update state management
 
-    def get_update_state(self, entity_id: int) -> Optional[State]:
+    def get_update_state(self, entity_id: int) -> State | None:
         """
         Get update state for specific entity.
 
@@ -397,13 +399,15 @@ class RedisSession(MemorySession):  # type: ignore[misc]
                 return State(
                     pts=state_data['pts'],
                     qts=state_data['qts'],
-                    date=datetime.fromisoformat(state_data['date']) if state_data.get('date') else None,
+                    date=datetime.fromisoformat(state_data['date'])
+                    if state_data.get('date')
+                    else None,
                     seq=state_data['seq'],
                     unread_count=state_data['unread_count'],
                 )
             return None
         except Exception as e:
-            logger.debug(f"Failed to get update state for entity {entity_id}: {e}")
+            logger.debug(f'Failed to get update state for entity {entity_id}: {e}')
             return None
 
     def get_update_states(self) -> dict[int, State]:
@@ -420,7 +424,9 @@ class RedisSession(MemorySession):  # type: ignore[misc]
                     states[entity_id] = State(
                         pts=state_data['pts'],
                         qts=state_data['qts'],
-                        date=datetime.fromisoformat(state_data['date']) if state_data.get('date') else None,
+                        date=datetime.fromisoformat(state_data['date'])
+                        if state_data.get('date')
+                        else None,
                         seq=state_data['seq'],
                         unread_count=state_data['unread_count'],
                     )
@@ -428,7 +434,7 @@ class RedisSession(MemorySession):  # type: ignore[misc]
                     continue
             return states
         except Exception as e:
-            logger.debug(f"Failed to get update states: {e}")
+            logger.debug(f'Failed to get update states: {e}')
             return {}
 
     def set_update_state(self, entity_id: int, state: State) -> None:
@@ -446,7 +452,7 @@ class RedisSession(MemorySession):  # type: ignore[misc]
                 'date': state.date.isoformat() if state.date else None,
                 'seq': state.seq,
                 'unread_count': state.unread_count,
-                'updated_at': datetime.now(timezone.utc).isoformat(),
+                'updated_at': datetime.now(UTC).isoformat(),
             }
 
             self._client.hash_set(self._update_states_key, str(entity_id), state_data)
@@ -456,11 +462,13 @@ class RedisSession(MemorySession):  # type: ignore[misc]
                 self._client.expire_key(self._update_states_key, self._ttl_seconds)
 
         except Exception as e:
-            logger.error(f"Failed to set update state for entity {entity_id}: {e}")
+            logger.error(f'Failed to set update state for entity {entity_id}: {e}')
 
     # File caching methods
 
-    def get_file(self, md5_digest: bytes, file_size: int, cls: type[_SentFileType]) -> Optional[_SentFileType]:
+    def get_file(
+        self, md5_digest: bytes, file_size: int, cls: type[_SentFileType]
+    ) -> _SentFileType | None:
         """
         Get cached file information.
 
@@ -478,22 +486,26 @@ class RedisSession(MemorySession):  # type: ignore[misc]
                     return InputPhoto(
                         id=file_data['id'],
                         access_hash=file_data['access_hash'],
-                        file_reference=bytes.fromhex(file_data['file_reference']) if file_data[
-                            'file_reference'] else b''
+                        file_reference=bytes.fromhex(file_data['file_reference'])
+                        if file_data['file_reference']
+                        else b'',
                     )
                 elif cls == InputDocument:
                     return InputDocument(
                         id=file_data['id'],
                         access_hash=file_data['access_hash'],
-                        file_reference=bytes.fromhex(file_data['file_reference']) if file_data[
-                            'file_reference'] else b''
+                        file_reference=bytes.fromhex(file_data['file_reference'])
+                        if file_data['file_reference']
+                        else b'',
                     )
             return None
         except Exception as e:
-            logger.debug(f"Failed to get cached file: {e}")
+            logger.debug(f'Failed to get cached file: {e}')
             return None
 
-    def cache_file(self, md5_digest: bytes, file_size: int, instance: _SentFileType) -> None:
+    def cache_file(
+        self, md5_digest: bytes, file_size: int, instance: _SentFileType
+    ) -> None:
         """
         Cache file information.
 
@@ -509,9 +521,11 @@ class RedisSession(MemorySession):  # type: ignore[misc]
                 'file_size': file_size,
                 'id': instance.id,
                 'access_hash': instance.access_hash,
-                'file_reference': instance.file_reference.hex() if instance.file_reference else '',
+                'file_reference': instance.file_reference.hex()
+                if instance.file_reference
+                else '',
                 'type': 'photo' if isinstance(instance, InputPhoto) else 'document',
-                'cached_at': datetime.now(timezone.utc).isoformat(),
+                'cached_at': datetime.now(UTC).isoformat(),
             }
 
             self._client.hash_set(self._sent_files_key, file_key, file_data)
@@ -521,7 +535,7 @@ class RedisSession(MemorySession):  # type: ignore[misc]
                 self._client.expire_key(self._sent_files_key, self._ttl_seconds)
 
         except Exception as e:
-            logger.error(f"Failed to cache file: {e}")
+            logger.error(f'Failed to cache file: {e}')
 
     # Additional utility methods
 
@@ -587,6 +601,11 @@ class RedisSession(MemorySession):  # type: ignore[misc]
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
         """Context manager exit."""
         self.close()
