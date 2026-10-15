@@ -29,10 +29,27 @@ jobs:
           ls dist
           test -f "dist/redisthon-${tag}-py3-none-any.whl"
           test -f "dist/redisthon-${tag}.tar.gz"
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          awk -v v="$tag" '
+            index($0, "## [" v "]") == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found && !/^\[[^]]+\]: / { print }
+          ' CHANGELOG.md | sed -e '/./,$!d' > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::CHANGELOG.md has no section for $tag"
+            exit 1
+          fi
+          cat release-notes.md
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist
           path: dist/
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-notes
+          path: release-notes.md
 
   publish:
     needs: build
@@ -48,3 +65,26 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-notes
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md
