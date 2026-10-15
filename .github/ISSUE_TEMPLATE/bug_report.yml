@@ -1,0 +1,52 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Code that shows the problem. Remove API IDs, hashes and phone numbers.
+      render: python
+  - type: textarea
+    id: traceback
+    attributes:
+      label: Traceback or logs
+      description: Set the `redisthon` logger to DEBUG if the problem is silent.
+      render: text
+  - type: input
+    id: redisthon-version
+    attributes:
+      label: redisthon version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      placeholder: "3.13.1"
+    validations:
+      required: true
+  - type: input
+    id: telethon-version
+    attributes:
+      label: Telethon and redis-py versions
+      placeholder: "telethon 1.45.0, redis 8.1.0"
+    validations:
+      required: true
+  - type: input
+    id: server
+    attributes:
+      label: Server
+      description: Redis or Dragonfly, and its version.
+      placeholder: "Redis 7.4.2"
+    validations:
+      required: true
