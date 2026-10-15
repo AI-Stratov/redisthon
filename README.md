@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/AI-Stratov/redisthon/actions/workflows/ci.yml/badge.svg)](https://github.com/AI-Stratov/redisthon/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/redisthon.svg)](https://pypi.org/project/redisthon/)
+[![Python](https://img.shields.io/pypi/pyversions/redisthon.svg)](https://pypi.org/project/redisthon/)
 
 Telethon session storage in Redis or Dragonfly, for Telegram bots and userbots
 that run in containers or move between hosts, where a local `.session` file is
@@ -120,6 +121,11 @@ docker run -d -p 6379:6379 redis:8.10
 docker run -d -p 6380:6379 --ulimit memlock=-1 docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.2
 DRAGONFLY_PORT=6380 uv run pytest tests/integration
 ```
+
+## Changes and security
+
+See [CHANGELOG.md](CHANGELOG.md). Report vulnerabilities privately, as described
+in [SECURITY.md](SECURITY.md); it also has a deployment checklist.
 
 ## License
 
